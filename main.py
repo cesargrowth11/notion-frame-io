@@ -631,8 +631,10 @@ def notion_calculate_review_state(page: dict | None, versions: int, comment_sign
         "last_comment_id": _notion_prop_plain_text(props, PROP_LAST_COMMENT_ID, ""),
     }
 
-    if versions > state["last_reviewed_version"]:
-        state["last_reviewed_version"] = versions
+    # Self-heal states written by the previous round-counting logic, where the
+    # round counter could grow beyond the version that actually opened a round.
+    if state["last_reviewed_version"] > 0 and state["client_change_round"] > state["last_reviewed_version"]:
+        state["client_change_round"] = state["last_reviewed_version"]
 
     if event == "file.versioned":
         state["client_review_open"] = False
@@ -640,10 +642,12 @@ def notion_calculate_review_state(page: dict | None, versions: int, comment_sign
     if event == "comment.created":
         incoming_comment_id = resource_id or comment_signals.get("last_comment_id", "")
         is_new_comment = bool(incoming_comment_id and incoming_comment_id != state["last_comment_id"])
-        if is_new_comment and not state["client_review_open"]:
+        version_has_counted_round = versions <= state["last_reviewed_version"]
+        if is_new_comment and not version_has_counted_round:
             state["client_change_round"] += 1
+            state["last_reviewed_version"] = versions
+        if is_new_comment:
             state["client_review_open"] = True
-            state["last_reviewed_version"] = max(state["last_reviewed_version"], versions)
 
     if event in ("comment.deleted", "comment.completed"):
         if comment_signals.get("open_comments", 0) == 0:

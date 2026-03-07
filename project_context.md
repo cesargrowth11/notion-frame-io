@@ -7,6 +7,9 @@ Cloud Function que sincroniza status y senales de revision entre la base `Tareas
 **Version actual:** 2.3.2  
 **Estado:** Produccion (deployed)
 
+**Branch en validacion:** `feature/client-change-round-version-logic`  
+**Estado del branch:** validado en staging; pendiente merge a `main`
+
 ## Organizacion
 
 - Empresa: Efeonce Group SpA
@@ -112,6 +115,30 @@ notion-frame-io/
   - `PATCH /pages/{id}`
   - `POST /comments` cuando `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true`
 
+### Limitaciones confirmadas de comments en Notion API
+
+- la API publica puede crear comentarios y responder a una discusion existente
+- la API publica puede leer comentarios abiertos
+- la API publica no permite editar comentarios existentes
+- la API publica no permite recuperar comentarios resueltos
+- la API publica no expone una operacion para marcar una discusion como resuelta o reabierta
+
+### Factibilidad tecnica: comentarios resueltos entre Notion y Frame.io
+
+- `Frame.io -> Notion` es tecnicamente viable en forma parcial:
+  - Frame.io publica eventos `comment.completed` y `comment.uncompleted`
+  - el runtime actual ya usa `GET /v4/accounts/{account_id}/files/{file_id}/comments` y cuenta `resolved_comments` cuando el comentario trae `completed_at`
+  - por eso, con solo suscribir esos eventos y ajustar la logica de reapertura/cierre, Notion puede reflejar bien el estado estructurado (`Open Frame Comments`, `Resolved Frame Comments`, `Client Review Open`)
+- `Notion -> Frame.io` no es viable si se pretende usar el estado resuelto nativo de los comentarios de Notion como trigger:
+  - la API publica de Notion no permite leer discusiones resueltas ni operar resolver/reabrir
+  - por tanto, si un usuario marca "resuelto" en la UI nativa de comentarios de Notion, el backend no tiene una via publica confiable para detectar esa accion
+- la capacidad inversa para completar comentarios en Frame.io tampoco esta documentada como write path estable en la documentacion publica actual:
+  - la documentacion oficial confirma eventos y lectura de comentarios
+  - pero el material publico de migracion sigue tratando la visualizacion/modificacion del completion status como capacidad no consolidada
+- conclusion operativa:
+  - no existe hoy una ruta publica y estable para sincronizacion nativa bidireccional de "resolved comments"
+  - si se quiere una UX equivalente, debe modelarse con estado estructurado propio y no depender del toggle nativo de discusiones resueltas de Notion
+
 ## Base de Datos Notion: `Tareas`
 
 **Database ID:** `3a54f0904be14158833533ba96557a73`
@@ -131,9 +158,9 @@ notion-frame-io/
 | `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
 | `Last Frame Comment At` | Date | Fecha del ultimo comentario |
 | `Last Frame Comment Timecode` | Rich text | Timecode del ultimo comentario |
-| `Last Reviewed Version` | Number | Version base de la ronda |
+| `Last Reviewed Version` | Number | Ultima version que ya abrio una ronda contabilizada |
 | `Client Review Open` | Checkbox | Ronda de cliente abierta |
-| `Client Change Round` | Number | Contador persistente de rondas |
+| `Client Change Round` | Number | Contador persistente de rondas por version |
 | `RpA` | Formula | Calculado en Notion |
 | `Semaforo RpA` | Formula | Calculado en Notion |
 
@@ -181,8 +208,10 @@ notion-frame-io/
 
 ### Logica actual de `Client Change Round`
 
-- abre ronda con `comment.created`
+- abre ronda con el primer `comment.created` de una version que aun no tenia ronda contabilizada
+- comentarios adicionales, cierres o reaperturas sobre esa misma version no incrementan el contador
 - cierra ronda con `file.versioned`
+- si una pagina ya arrastra un `Client Change Round` mayor que `Last Reviewed Version` por la logica anterior, el runtime la autocorrige al proximo procesamiento
 - no usa `Cambios Solicitados` como disparador principal mientras `BUG-006` siga abierto
 
 ### Plan pendiente: comentarios automáticos en Notion
@@ -252,8 +281,33 @@ notion-frame-io/
 
 ### Follow-up abierto
 
-- ampliar a `comment.completed`
-- ampliar a `comment.uncompleted`
+- ampliar el webhook activo a `comment.completed`
+- ampliar el webhook activo a `comment.uncompleted`
+- cuando esos eventos entren, refrescar senales estructuradas en Notion (`Open Frame Comments`, `Resolved Frame Comments`, `Client Review Open`)
+- no asumir sync uno-a-uno del estado resuelto de los comentarios nativos de Notion: la API publica no permite resolver o reabrir discusiones
+- si se quiere una accion desde Notion, disenar una senal estructurada propia (`checkbox`, `status` o base auxiliar de feedback) en vez de depender de la UI nativa de comentarios resueltos
+- no implementar `Notion -> Frame.io` para "resolver comentario" hasta validar primero un write path oficial y estable de Frame.io para completion status
+
+### Criterio aplicado a `Client Change Round` en esta branch
+
+1. `Client Change Round` cuenta iteraciones reales por version entregada, no reaperturas de feedback sobre la misma version.
+2. Una version puede abrir como maximo una ronda contabilizada.
+3. La siguiente ronda solo puede nacer despues de `file.versioned` y nuevo feedback.
+4. Los registros heredados que quedaron sobrecontados se corrigen automaticamente cuando la tarea vuelva a ser procesada.
+
+### Plan recomendado para la eventual feature
+
+1. Fase 1, segura:
+   - suscribir el webhook live a `comment.completed` y `comment.uncompleted`
+   - ajustar `notion_calculate_review_state()` para reabrir con `comment.uncompleted` cuando vuelvan a existir abiertos
+   - mantener `fio_get_comment_signals()` como fuente de verdad usando `completed_at`
+   - opcionalmente dejar un comentario informativo en Notion cuando un comentario quede resuelto o reabierto en Frame.io
+2. Fase 2, de diseno:
+   - definir si el usuario necesita una accion desde Notion o solo visibilidad
+   - si necesita accion, modelarla con propiedades o una base auxiliar de feedback, no con el toggle nativo de discusiones resueltas de Notion
+3. Fase 3, bloqueada hasta validacion externa:
+   - validar contra documentacion publica y/o prototipo si Frame.io permite completar/reabrir comentarios por API de forma soportada
+   - solo despues de esa validacion considerar una sincronizacion `Notion -> Frame.io`
 
 ## Funcionalidades clave del codigo
 

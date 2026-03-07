@@ -17,6 +17,7 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
 | `BUG-003` | resolved | 2026-03-07 | 2026-03-07 | Persistencia de tokens fallaba con 403 al intentar mutar env vars de Cloud Function |
 | `BUG-004` | resolved | 2026-03-07 | 2026-03-07 | Asociacion Frame.io -> Notion dependia solo de parsear URL |
 | `BUG-005` | resolved | 2026-03-07 | 2026-03-07 | Comentarios de Frame.io no se reflejaban en `Frame Comments` de Notion |
+| `BUG-007` | monitoring | 2026-03-07 | TBD | `Client Change Round` podia sobrecontar rondas al reabrirse feedback sobre la misma version |
 | `BUG-006` | open | 2026-03-07 | — | `Cambios Solicitados` reporta `frameio_status: updated` pero no deja el asset en `Changes requested` |
 
 ## Detalle
@@ -94,5 +95,24 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
 - Estado actual:
   - No se usa `Cambios Solicitados` como señal principal para `Client Change Round`.
   - La logica de rondas usa `comment.created` y `file.versioned`.
+- Referencias:
+  - `CHANGELOG.md` `Unreleased`
+
+### `BUG-007` `Client Change Round` podia sobrecontar rondas al reabrirse feedback sobre la misma version
+
+- Sintoma:
+  - Una tarea podia mostrar `Client Change Round = 2` aunque aun no existiera una nueva version en Frame.io.
+- Causa raiz:
+  - `notion_calculate_review_state()` estaba contando ciclos abierto/cerrado de review y no iteraciones reales por version.
+  - Si la review se cerraba y luego entraba feedback nuevo sobre la misma version, el contador podia volver a incrementarse.
+- Resolucion en branch:
+  - `Last Reviewed Version` ahora representa la ultima version que ya abrio una ronda contabilizada.
+  - `Client Change Round` solo incrementa con el primer `comment.created` de una version que aun no tenia ronda.
+  - `file.versioned` sigue cerrando la review, pero no crea por si mismo una nueva ronda contada.
+  - Si una pagina ya arrastra un `Client Change Round` mayor que `Last Reviewed Version`, el runtime la autocorrige al proximo procesamiento.
+- Estado actual:
+  - Corregido en la branch `feature/client-change-round-version-logic`.
+  - Validado en staging con la tarea `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`, que paso de `Client Change Round = 2` a `1`.
+  - Pendiente merge a `main` y deploy productivo.
 - Referencias:
   - `CHANGELOG.md` `Unreleased`

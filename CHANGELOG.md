@@ -6,6 +6,15 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 
 ## [Unreleased]
 
+### Cambiado
+- [BUG-007] `Client Change Round` en la branch `feature/client-change-round-version-logic` ahora cuenta una sola ronda por version entregada: comentarios adicionales, cierres o reaperturas sobre la misma version ya no incrementan el contador.
+- [BUG-007] `Last Reviewed Version` pasa a representar la ultima version que ya abrio una ronda contabilizada, en lugar de adelantarse automaticamente a la ultima version vista.
+- [BUG-007] El runtime ahora autocorrige paginas heredadas donde `Client Change Round` quedo mayor que `Last Reviewed Version` por la logica anterior.
+
+### Documentacion
+- Se alinearon `README.md`, `project_context.md` y `BUGS.md` con la nueva semantica version-based de `Client Change Round` antes de validar el branch para merge.
+- Se agrego trazabilidad explicita de que la fix fue validada en staging y sigue pendiente de merge a `main`.
+
 ## [2.3.2] - 2026-03-07
 
 ### Agregado

@@ -7,7 +7,7 @@ Cloud Function para sincronizar estados y señales de revision entre la base `Ta
 - `Notion -> Frame.io`: funcional para `En curso`
 - `Frame.io -> Notion`: funcional para versiones, comentarios y senales base de revision
 - `Frame.io -> Notion Comments`: funcional en produccion para `comment.created`
-- `Client Change Round`: funcional en primer corte
+- `Client Change Round`: ajustado y validado en staging branch para contar rondas por version y no por reaperturas sobre la misma version; pendiente merge a `main`
 - `Cambios Solicitados -> Changes requested`: no confiable todavia, ver `BUG-006`
 
 ## Que hace hoy
@@ -66,14 +66,16 @@ La funcion solo escribe senales base en Notion. Las formulas de `RpA` y `Semafor
 | `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
 | `Last Frame Comment At` | Date | Fecha del ultimo comentario |
 | `Last Frame Comment Timecode` | Rich text | Timecode formateado del ultimo comentario |
-| `Last Reviewed Version` | Number | Version base de la ronda actual |
+| `Last Reviewed Version` | Number | Ultima version que ya abrio una ronda contabilizada |
 | `Client Review Open` | Checkbox | Indica si la ronda sigue abierta |
-| `Client Change Round` | Number | Contador persistente de rondas |
+| `Client Change Round` | Number | Contador persistente de rondas por version |
 
 ### Logica actual de `Client Change Round`
 
-- abre una ronda con `comment.created`
+- abre una ronda con el primer `comment.created` de una version que aun no tenia ronda contabilizada
+- comentarios adicionales, cierres o reaperturas sobre esa misma version no incrementan el contador
 - cierra la ronda con `file.versioned`
+- si una pagina ya arrastra un `Client Change Round` mayor que `Last Reviewed Version` por la logica anterior, el runtime la autocorrige al proximo procesamiento
 - no usa `Cambios Solicitados` como senal principal mientras `BUG-006` siga abierto
 
 ## Arquitectura

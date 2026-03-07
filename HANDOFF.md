@@ -273,6 +273,78 @@
   - Production is running the documented `2.3.2` release with the Notion comment mirror enabled
   - Temporary local file `.env.comment-mirror.yaml` was removed after deploy
 
+## 2026-03-07 15:35 America/Santiago - Codex
+
+- Task: Research comment-completion sync feasibility between Frame.io and Notion
+- Files changed: `TASKS.md`, `project_context.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed official Frame.io webhook docs confirming `comment.completed` and `comment.uncompleted`
+  - Reviewed official Notion comment docs/guides confirming the public REST API can create comments and read open comments, but cannot edit comments, retrieve resolved comments, or resolve/reopen discussions
+- Notes:
+  - A full native resolved-state sync is not possible with the current Notion public API
+  - The viable future implementation is partial sync: subscribe to Frame.io completion events, refresh structured Notion properties, and optionally mirror an informational note in Notion comments
+
+## 2026-03-07 16:20 America/Santiago - Codex
+
+- Task: Refine the resolved-comment sync investigation into an implementation plan and concrete follow-up tasks
+- Files changed: `TASKS.md`, `project_context.md`, `HANDOFF.md`
+- Verification:
+  - Re-read current code touchpoints in `main.py`, especially `fio_get_comment_signals()`, `notion_calculate_review_state()`, and `handle_frameio()`
+  - Confirmed the runtime already counts resolved comments from Frame.io using `completed_at`, so `Frame.io -> Notion` is a small, low-risk extension once `comment.completed` / `comment.uncompleted` events are subscribed
+  - Confirmed the public Notion API still cannot read resolved discussions or resolve/reopen them, and the public Frame.io docs still do not establish a stable completion-status write contract for `Notion -> Frame.io`
+- Notes:
+  - Recommended plan is now documented in `project_context.md` as three phases:
+    - safe partial sync from Frame.io completion/reopen events into structured Notion fields
+    - separate UX design for a structured "resolve in Frame.io" action in Notion
+    - block any native `Notion -> Frame.io` completion feature until a supported Frame.io write path is validated
+  - `TASKS.md` now tracks the investigation as done and leaves three explicit pending tasks: webhook expansion, structured Notion UX design, and Frame.io write-path validation
+
+## 2026-03-07 16:35 America/Santiago - Codex
+
+- Task: Correct the follow-up documentation so the latest pending logic issue is `Client Change Round`, not resolved-comment sync
+- Files changed: `TASKS.md`, `project_context.md`, `HANDOFF.md`
+- Verification:
+  - Re-read the current `notion_calculate_review_state()` logic in `main.py`
+  - Confirmed the current implementation can increment a new round after review closes and reopens on the same version because it models open/close review cycles, not strictly version iterations
+  - Documented the recommended business definition: one counted round per delivered version, with further comments or reopen events on that same version staying inside the same round
+- Notes:
+  - No runtime behavior was changed
+  - `TASKS.md` now includes a dedicated pending task to redefine `Client Change Round` as version-based before any code change is attempted
+
+## 2026-03-07 17:05 America/Santiago - Codex
+
+- Task: Implement the version-based `Client Change Round` logic in a feature branch
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `BUGS.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Ran a targeted local Python check with stubbed imports to exercise `notion_calculate_review_state()`:
+    - first comment on version 1 -> round `1`
+    - reopened feedback on version 1 -> round stays `1`
+    - `file.versioned` to version 2 -> round stays `1`
+    - first comment on version 2 -> round becomes `2`
+    - inherited real-world state (`Client Change Round = 2`, `Last Reviewed Version = 1`, `Frame Versions = 1`) now self-heals to round `1`
+- Notes:
+  - Work is isolated in branch `feature/client-change-round-version-logic`
+  - `Last Reviewed Version` now represents the last version that already opened a counted round
+  - `Client Review Open` still reflects whether review is currently open; only the round-counting semantics changed
+  - Added a conservative self-heal so pages already inflated by the old logic are corrected on their next processing cycle
+  - No deploy was performed and `main` was not touched beyond creating the branch
+
+## 2026-03-07 17:35 America/Santiago - Codex
+
+- Task: Validate the `Client Change Round` fix end-to-end without touching the production function
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Deployed the branch to a temporary Cloud Function `notion-frameio-sync-staging`
+  - Confirmed staging health endpoint returned `status: ok`
+  - Sent a controlled `file.created` webhook for asset `7f289cd4-b30e-4103-91c8-48042497683a`
+  - Staging response reported `review_state.client_change_round = 1`, `client_review_open = true`, `last_reviewed_version = 1`
+  - Re-fetched Notion page `31839c2f-efe7-81dd-8bd3-ca760c9a7a63` and confirmed `Client Change Round` changed from `2` to `1`
+  - Deleted the temporary staging function after validation
+- Notes:
+  - This validated the real self-heal path against production data while keeping the main production function untouched
+  - The branch is now ready for merge review if you want to promote the fix
+
 ## Template
 
 Copy this block for the next handoff:
