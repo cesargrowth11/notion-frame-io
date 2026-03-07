@@ -418,6 +418,22 @@
   - This is technically viable, but the number should be treated as operational context rather than immutable history because Frame.io allows stack reordering
   - Recommended first release is intentionally narrow: `Last Frame Comment Version` plus `Version: N` in mirrored Notion comments
 
+## 2026-03-07 19:20 America/Santiago - Codex
+
+- Task: Implement comment-version attribution in a dedicated feature branch
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Ran a local stubbed Python check that:
+    - resolved `file-v2` to version ordinal `2` inside a simulated version stack
+    - resolved a standalone file to version `1`
+    - confirmed `format_frameio_comment_for_notion(..., 3)` renders `Version: 3`
+- Notes:
+  - Work is isolated in branch `feature/frameio-comment-version-attribution`
+  - Runtime now prepares `Last Frame Comment Version`, enriches `fio_get_comment_signals()` with `last_comment_version`, and adds `Version: N` to mirrored Notion comments
+  - The Notion write path is tolerant if `Last Frame Comment Version` does not yet exist in the database schema
+  - No deploy or live Notion schema change was performed in this step
+
 ## Template
 
 Copy this block for the next handoff:

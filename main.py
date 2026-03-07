@@ -64,6 +64,7 @@ PROP_LAST_COMMENT = os.environ.get("NOTION_PROP_LAST_COMMENT", "Last Frame Comme
 PROP_LAST_COMMENT_ID = os.environ.get("NOTION_PROP_LAST_COMMENT_ID", "Last Frame Comment ID")
 PROP_LAST_COMMENT_AT = os.environ.get("NOTION_PROP_LAST_COMMENT_AT", "Last Frame Comment At")
 PROP_LAST_COMMENT_TIMECODE = os.environ.get("NOTION_PROP_LAST_COMMENT_TIMECODE", "Last Frame Comment Timecode")
+PROP_LAST_COMMENT_VERSION = os.environ.get("NOTION_PROP_LAST_COMMENT_VERSION", "Last Frame Comment Version")
 PROP_LAST_REVIEWED_VERSION = os.environ.get("NOTION_PROP_LAST_REVIEWED_VERSION", "Last Reviewed Version")
 PROP_CLIENT_REVIEW_OPEN = os.environ.get("NOTION_PROP_CLIENT_REVIEW_OPEN", "Client Review Open")
 PROP_CHANGE_ROUND = os.environ.get("NOTION_PROP_CHANGE_ROUND", "Client Change Round")
@@ -467,6 +468,58 @@ def fio_comment_file_id(comment: dict | None) -> str | None:
     return None
 
 
+def _fio_get_v2_asset(asset_id: str) -> dict | None:
+    try:
+        r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning(f"Could not fetch V2 asset {asset_id}: {e}")
+    return None
+
+
+def _fio_get_v2_children(asset_id: str) -> list[dict]:
+    try:
+        r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}/children", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                return [item for item in data if isinstance(item, dict)]
+    except Exception as e:
+        logger.warning(f"Could not fetch V2 children for {asset_id}: {e}")
+    return []
+
+
+def fio_resolve_file_version_ordinal(file_id: str | None) -> int | None:
+    if not file_id:
+        return None
+
+    asset = _fio_get_v2_asset(file_id)
+    if not isinstance(asset, dict):
+        return None
+
+    parent_id = asset.get("parent_id")
+    if not parent_id:
+        return 1
+
+    parent = _fio_get_v2_asset(parent_id)
+    if not isinstance(parent, dict) or parent.get("type") != "version_stack":
+        return 1
+
+    children = _fio_get_v2_children(parent_id)
+    for index, child in enumerate(children):
+        if child.get("id") == file_id:
+            return index + 1
+
+    logger.warning(f"File {file_id} was not found inside version stack {parent_id}")
+    return None
+
+
+def fio_resolve_comment_version(comment: dict | None) -> int | None:
+    return fio_resolve_file_version_ordinal(fio_comment_file_id(comment))
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -498,6 +551,7 @@ def fio_get_comment_signals(asset_id: str) -> dict:
         "last_comment_text": "",
         "last_comment_at": "",
         "last_comment_timecode": "",
+        "last_comment_version": 0,
     }
 
     try:
@@ -532,6 +586,7 @@ def fio_get_comment_signals(asset_id: str) -> dict:
             out["last_comment_text"] = (latest.get("text") or "").strip()
             out["last_comment_at"] = latest.get("updated_at") or latest.get("created_at") or ""
             out["last_comment_timecode"] = _format_timecode(latest.get("timestamp"))
+            out["last_comment_version"] = fio_resolve_comment_version(latest) or 0
     except Exception as e:
         logger.warning(f"Comment signal fetch error for {asset_id}: {e}")
 
@@ -726,13 +781,16 @@ def _format_comment_datetime(value: str) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def format_frameio_comment_for_notion(comment: dict) -> list[dict]:
+def format_frameio_comment_for_notion(comment: dict, version_ordinal: int | None = None) -> list[dict]:
     text = (comment.get("text") or "").strip() or "(Comentario de Frame.io sin texto)"
     rich_text = []
     rich_text.extend(_notion_rich_text_objects("Feedback desde Frame.io", bold=True))
     rich_text.extend(_notion_rich_text_objects("\n\n" + text))
 
     metadata = []
+    if version_ordinal:
+        metadata.append(("Version", str(version_ordinal)))
+
     timecode = _format_timecode(comment.get("timestamp"))
     if timecode:
         metadata.append(("Timecode", timecode))
@@ -762,7 +820,15 @@ def notion_create_page_comment(page_id: str, rich_text: list[dict]) -> dict:
     return r.json() if r.text else {}
 
 
-def maybe_mirror_frameio_comment_to_notion(page_id: str, page: dict | None, event: str, resource_id: str, asset_id: str, comment: dict | None):
+def maybe_mirror_frameio_comment_to_notion(
+    page_id: str,
+    page: dict | None,
+    event: str,
+    resource_id: str,
+    asset_id: str,
+    comment: dict | None,
+    comment_version: int | None = None,
+):
     if not NOTION_ENABLE_FRAME_COMMENT_MIRROR:
         return "disabled"
     if event != "comment.created":
@@ -779,7 +845,7 @@ def maybe_mirror_frameio_comment_to_notion(page_id: str, page: dict | None, even
         logger.warning(f"Skipping mirrored Notion comment for {resource_id}: comment payload unavailable")
         return "skipped:no-comment"
 
-    notion_create_page_comment(page_id, format_frameio_comment_for_notion(comment))
+    notion_create_page_comment(page_id, format_frameio_comment_for_notion(comment, comment_version))
     logger.info(f"Mirrored Frame.io comment {resource_id} into Notion page {page_id}")
     return "created"
 
@@ -809,6 +875,7 @@ def notion_update_counts(
         props[PROP_LAST_COMMENT] = _notion_rich_text_prop(comment_signals.get("last_comment_text", ""))
         props[PROP_LAST_COMMENT_ID] = _notion_rich_text_prop(comment_signals.get("last_comment_id", ""))
         props[PROP_LAST_COMMENT_TIMECODE] = _notion_rich_text_prop(comment_signals.get("last_comment_timecode", ""))
+        props[PROP_LAST_COMMENT_VERSION] = {"number": int(comment_signals.get("last_comment_version", 0) or 0)}
         last_comment_at = comment_signals.get("last_comment_at", "")
         props[PROP_LAST_COMMENT_AT] = {"date": {"start": last_comment_at}} if last_comment_at else {"date": None}
 
@@ -833,6 +900,7 @@ def notion_update_counts(
             PROP_LAST_COMMENT_ID,
             PROP_LAST_COMMENT_AT,
             PROP_LAST_COMMENT_TIMECODE,
+            PROP_LAST_COMMENT_VERSION,
             PROP_LAST_REVIEWED_VERSION,
             PROP_CLIENT_REVIEW_OPEN,
             PROP_CHANGE_ROUND,
@@ -1093,11 +1161,13 @@ def handle_frameio(request):
 
     asset_id = ""
     comment = None
+    comment_version = None
     if resource_type == "file":
         asset_id = resource_id
     elif resource_type == "comment" or event.startswith("comment."):
         comment = fio_get_comment(resource_id)
         asset_id = fio_comment_file_id(comment) or fio_get_comment_file_id(resource_id) or ""
+        comment_version = fio_resolve_comment_version(comment)
     else:
         return jsonify({"skipped": True, "reason": f"Unsupported resource type '{resource_type}'", "event": event}), 200
 
@@ -1124,7 +1194,7 @@ def handle_frameio(request):
             review_state=review_state,
         )
         try:
-            mirror_status = maybe_mirror_frameio_comment_to_notion(page_id, page, event, resource_id, asset_id, comment)
+            mirror_status = maybe_mirror_frameio_comment_to_notion(page_id, page, event, resource_id, asset_id, comment, comment_version)
         except Exception as e:
             mirror_status = f"error:{e}"
             logger.warning(f"Notion comment mirror failed for page {page_id}, comment {resource_id}: {e}")

@@ -158,6 +158,7 @@ notion-frame-io/
 | `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
 | `Last Frame Comment At` | Date | Fecha del ultimo comentario |
 | `Last Frame Comment Timecode` | Rich text | Timecode del ultimo comentario |
+| `Last Frame Comment Version` | Number | Version inferida del ultimo comentario |
 | `Last Reviewed Version` | Number | Ultima version que ya abrio una ronda contabilizada |
 | `Client Review Open` | Checkbox | Ronda de cliente abierta |
 | `Client Change Round` | Number | Contador persistente de rondas por version |
@@ -500,6 +501,13 @@ Plan de rollout recomendado:
    - asset con varias versiones
    - comentario sobre version vieja
 4. despues decidir si vale la pena ampliar a historiales completos o reportes por version
+
+Estado de implementacion en la branch `feature/frameio-comment-version-attribution`:
+- `main.py` ya tiene un helper para resolver el ordinal de version a partir del `file_id` del comentario
+- `fio_get_comment_signals()` ya puede devolver `last_comment_version`
+- `format_frameio_comment_for_notion()` ya puede renderizar `Version: N`
+- `notion_update_counts()` intenta escribir `Last Frame Comment Version` y hace fallback si la propiedad aun no existe en Notion
+- falta validar el comportamiento con assets reales de varias versiones antes de mergear o desplegar
 
 ## Documentacion complementaria
 

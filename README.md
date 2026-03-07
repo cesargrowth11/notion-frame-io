@@ -66,6 +66,7 @@ La funcion solo escribe senales base en Notion. Las formulas de `RpA` y `Semafor
 | `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
 | `Last Frame Comment At` | Date | Fecha del ultimo comentario |
 | `Last Frame Comment Timecode` | Rich text | Timecode formateado del ultimo comentario |
+| `Last Frame Comment Version` | Number | Version inferida del ultimo comentario dentro del version stack |
 | `Last Reviewed Version` | Number | Ultima version que ya abrio una ronda contabilizada |
 | `Client Review Open` | Checkbox | Indica si la ronda sigue abierta |
 | `Client Change Round` | Number | Contador persistente de rondas por version |
@@ -237,6 +238,11 @@ Alcance recomendado de la primera implementacion:
 - extender `fio_get_comment_signals()` para devolver `last_comment_version`
 - extender el mirror de comentarios para mostrar `Version: N` junto al comentario espejado en Notion
 - no intentar backfill completo de todos los comentarios en v1
+
+Estado en la branch `feature/frameio-comment-version-attribution`:
+- el runtime ya resuelve `Version: N` para el ultimo comentario y para `comment.created`
+- `Last Frame Comment Version` se escribe de forma tolerante: si la propiedad no existe todavia en Notion, el patch hace fallback sin romper el sync principal
+- el mirror de comentarios ya puede mostrar `Version: N` en la metadata del comentario espejado
 
 Algoritmo propuesto:
 1. leer el comentario (`GET /comments/{comment_id}` o listado de comentarios del file)

@@ -12,6 +12,7 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - [BUG-007] El runtime ahora autocorrige paginas heredadas donde `Client Change Round` quedo mayor que `Last Reviewed Version` por la logica anterior.
 - La branch `feature/notion-workflow-change-rounds` agrega una rama `workflow_only` en `/notion-webhook` para tareas sin `Frame Asset ID`, usando `Estado` y `Review Source` para alimentar `Workflow Change Round`, `Workflow Review Open` y `Last Workflow Status`.
 - La logica de workflow-only bootstrappea la primera ronda en `1` cuando una tarea preexistente entra por primera vez a `Listo para revision` con campos auxiliares vacios, y evita dobles incrementos en webhooks repetidos mientras la revision sigue abierta.
+- La branch `feature/frameio-comment-version-attribution` agrega resolucion de `Version N` para comentarios de Frame.io a partir de `comment.file_id` y el orden actual del version stack, y prepara la propiedad `Last Frame Comment Version` junto con la metadata `Version: N` en comentarios espejados.
 
 ### Documentacion
 - Se alinearon `README.md`, `project_context.md` y `BUGS.md` con la nueva semantica version-based de `Client Change Round` antes de validar el branch para merge.
