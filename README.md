@@ -6,6 +6,7 @@ Cloud Function para sincronizar estados y señales de revision entre la base `Ta
 
 - `Notion -> Frame.io`: funcional para `En curso`
 - `Frame.io -> Notion`: funcional para versiones, comentarios y senales base de revision
+- `Frame.io -> Notion Comments`: funcional en produccion para `comment.created`
 - `Client Change Round`: funcional en primer corte
 - `Cambios Solicitados -> Changes requested`: no confiable todavia, ver `BUG-006`
 
@@ -14,6 +15,14 @@ Cloud Function para sincronizar estados y señales de revision entre la base `Ta
 ### 1. Notion -> Frame.io
 
 Cuando cambia `Estado` en Notion, la funcion intenta actualizar el campo `Status` del asset en Frame.io.
+
+### Asociacion actual de la tarea con el asset
+
+- el input manual inicial sigue siendo `URL Frame.io`
+- desde esa URL la funcion intenta extraer o resolver el `asset_id`
+- una vez identificado, la funcion cachea `Frame Asset ID` en la pagina de Notion
+- en runtime, `Frame Asset ID` se conserva como referencia tecnica estable para no depender siempre de reparsear la URL
+- por seguridad operativa, no se cambio la precedencia actual mientras el flujo productivo siga funcionando
 
 ### 2. Frame.io -> Notion
 
@@ -30,6 +39,9 @@ Cuando llega un webhook de Frame.io:
 - actualiza `Last Reviewed Version`
 - actualiza `Client Review Open`
 - actualiza `Client Change Round`
+- opcionalmente publica un comentario page-level en Notion cuando `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true` y el evento es `comment.created`
+  - el comentario espejado se formatea con rich text legible y conserva emojis si vienen en el comentario original
+  - el formatter preserva saltos de linea para que el comentario no colapse en una sola linea
 
 ### 3. Pull on status change
 
@@ -100,6 +112,7 @@ Frame.io Webhook  -> /frameio-webhook -> Notion property updates
 - `NOTION_PROP_LAST_REVIEWED_VERSION`
 - `NOTION_PROP_CLIENT_REVIEW_OPEN`
 - `NOTION_PROP_CHANGE_ROUND`
+- `NOTION_ENABLE_FRAME_COMMENT_MIRROR`
 
 ### Frame.io
 
@@ -130,6 +143,16 @@ gcloud functions deploy notion-frameio-sync \
   --project=efeonce-group
 ```
 
+## GitHub workflow y rollback
+
+- no desarrollar features directo sobre `main`
+- crear una rama por feature, por ejemplo `feature/notion-comment-mirror`
+- abrir PR hacia `main` solo despues de validar sintaxis, smoke tests y documentacion
+- mergear a `main` solo cuando el feature flag este apagado por defecto y el comportamiento actual siga intacto
+- usar `CHANGELOG.md` en `Unreleased` mientras la feature no este liberada
+- crear tag solo al publicar una version estable, por ejemplo `v2.3.2`
+- si algo falla, primero apagar el feature flag y luego revertir el PR si hace falta
+
 ## Endpoints
 
 | Metodo | Path | Uso |
@@ -153,6 +176,8 @@ gcloud functions deploy notion-frameio-sync \
 - `BUG-006`: `Cambios Solicitados` no esta validado como sync confiable hacia `Changes requested`
 - el webhook actual no quedo ampliado de forma confirmada a `comment.completed` / `comment.uncompleted`
 - el payload real de comentarios no trae autor de forma rica, por eso no existe aun `Last Frame Comment By`
+- aunque la URL es el input manual inicial, el runtime actual conserva `Frame Asset ID` como referencia estable para evitar regresiones si la URL cambia o queda desactualizada
+- el mirror de comentarios hacia Notion Comments ya fue validado y quedo habilitado en produccion para `comment.created`
 
 ## Documentacion operativa
 

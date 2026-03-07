@@ -13,8 +13,8 @@ FLUJO 3 — Pull on status change:
 
 Efeonce Group — Globe Studio Pipeline
 
-Base de datos Notion: "Tareas" (5126d7d8-bf3f-454c-80f4-be31d1ca38d4)
-Propiedades: Estado, URL Frame.io, Frame Asset ID, Frame Versions, Frame Comments
+Base de datos Notion: "Tareas"
+Propiedades clave: Estado, URL Frame.io, Frame Asset ID, Frame Versions, Frame Comments
 """
 
 import os
@@ -22,7 +22,7 @@ import re
 import json
 import logging
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone
 import functions_framework
 from flask import jsonify
 import requests
@@ -78,6 +78,16 @@ STATUS_MAP = {
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notion-frameio-sync")
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+NOTION_ENABLE_FRAME_COMMENT_MIRROR = _env_flag("NOTION_ENABLE_FRAME_COMMENT_MIRROR", False)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -424,6 +434,31 @@ def fio_get_comment_file_id(comment_id: str) -> str | None:
     return None
 
 
+def fio_get_comment(comment_id: str) -> dict | None:
+    """Fetch a single comment payload from Frame.io V4."""
+    try:
+        r = _fio_request("GET", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/comments/{comment_id}", timeout=15)
+        r.raise_for_status()
+        data = r.json().get("data", {})
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning(f"Could not fetch comment {comment_id}: {e}")
+        return None
+
+
+def fio_comment_file_id(comment: dict | None) -> str | None:
+    if not isinstance(comment, dict):
+        return None
+    file_id = comment.get("file_id")
+    if file_id:
+        return file_id
+
+    file_obj = comment.get("file", {})
+    if isinstance(file_obj, dict):
+        return file_obj.get("id")
+    return None
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -499,10 +534,12 @@ def fio_get_comment_signals(asset_id: str) -> dict:
 # =============================================
 
 _NOTION = "https://api.notion.com/v1"
+_NOTION_VERSION = "2022-06-28"
+_NOTION_COMMENT_VERSION = "2025-09-03"
 
 
-def _not_h():
-    return {"Authorization": f"Bearer {NOTION_TOKEN}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
+def _not_h(version: str = _NOTION_VERSION):
+    return {"Authorization": f"Bearer {NOTION_TOKEN}", "Content-Type": "application/json", "Notion-Version": version}
 
 
 def _notion_first_page(filter_body: dict) -> str | None:
@@ -560,6 +597,31 @@ def _notion_prop_plain_text(props: dict, name: str, default: str = "") -> str:
     return default
 
 
+def _notion_annotations(*, bold: bool = False) -> dict:
+    return {
+        "bold": bold,
+        "italic": False,
+        "strikethrough": False,
+        "underline": False,
+        "code": False,
+        "color": "default",
+    }
+
+
+def _notion_rich_text_objects(value: str, chunk_size: int = 1800, *, bold: bool = False) -> list[dict]:
+    text = "" if value is None else str(value)
+    if text == "":
+        return []
+    return [
+        {
+            "type": "text",
+            "text": {"content": text[i:i + chunk_size]},
+            "annotations": _notion_annotations(bold=bold),
+        }
+        for i in range(0, len(text), chunk_size)
+    ]
+
+
 def notion_calculate_review_state(page: dict | None, versions: int, comment_signals: dict, event: str, resource_id: str = "") -> dict:
     props = page.get("properties", {}) if isinstance(page, dict) else {}
     state = {
@@ -594,9 +656,72 @@ def notion_calculate_review_state(page: dict | None, versions: int, comment_sign
 
 
 def _notion_rich_text_prop(value: str) -> dict:
-    if not value:
-        return {"rich_text": []}
-    return {"rich_text": [{"type": "text", "text": {"content": value[:2000]}}]}
+    return {"rich_text": _notion_rich_text_objects(value[:2000])}
+
+
+def _format_comment_datetime(value: str) -> str:
+    dt = _parse_iso_datetime(value)
+    if not dt:
+        return value
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def format_frameio_comment_for_notion(comment: dict) -> list[dict]:
+    text = (comment.get("text") or "").strip() or "(Comentario de Frame.io sin texto)"
+    rich_text = []
+    rich_text.extend(_notion_rich_text_objects("Feedback desde Frame.io", bold=True))
+    rich_text.extend(_notion_rich_text_objects("\n\n" + text))
+
+    metadata = []
+    timecode = _format_timecode(comment.get("timestamp"))
+    if timecode:
+        metadata.append(("Timecode", timecode))
+
+    comment_at = comment.get("updated_at") or comment.get("created_at") or ""
+    if comment_at:
+        metadata.append(("Fecha", _format_comment_datetime(comment_at)))
+
+    if metadata:
+        rich_text.extend(_notion_rich_text_objects("\n\n"))
+        for index, (label, value) in enumerate(metadata):
+            if index:
+                rich_text.extend(_notion_rich_text_objects("\n"))
+            rich_text.extend(_notion_rich_text_objects(f"{label}: ", bold=True))
+            rich_text.extend(_notion_rich_text_objects(value))
+
+    return rich_text
+
+
+def notion_create_page_comment(page_id: str, rich_text: list[dict]) -> dict:
+    body = {
+        "parent": {"page_id": page_id},
+        "rich_text": rich_text,
+    }
+    r = requests.post(f"{_NOTION}/comments", headers=_not_h(_NOTION_COMMENT_VERSION), json=body, timeout=15)
+    r.raise_for_status()
+    return r.json() if r.text else {}
+
+
+def maybe_mirror_frameio_comment_to_notion(page_id: str, page: dict | None, event: str, resource_id: str, asset_id: str, comment: dict | None):
+    if not NOTION_ENABLE_FRAME_COMMENT_MIRROR:
+        return "disabled"
+    if event != "comment.created":
+        return "skipped:not-comment-created"
+    if not resource_id or not page_id:
+        return "skipped:missing-context"
+
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    if _notion_prop_plain_text(props, PROP_LAST_COMMENT_ID, "") == resource_id:
+        logger.info(f"Skipping mirrored Notion comment for duplicate Frame.io comment {resource_id}")
+        return "skipped:duplicate"
+
+    if not isinstance(comment, dict):
+        logger.warning(f"Skipping mirrored Notion comment for {resource_id}: comment payload unavailable")
+        return "skipped:no-comment"
+
+    notion_create_page_comment(page_id, format_frameio_comment_for_notion(comment))
+    logger.info(f"Mirrored Frame.io comment {resource_id} into Notion page {page_id}")
+    return "created"
 
 
 def notion_update_counts(
@@ -864,10 +989,12 @@ def handle_frameio(request):
         return jsonify({"skipped": True, "reason": "Event for another project", "event": event, "project_id": project_id}), 200
 
     asset_id = ""
+    comment = None
     if resource_type == "file":
         asset_id = resource_id
     elif resource_type == "comment" or event.startswith("comment."):
-        asset_id = fio_get_comment_file_id(resource_id) or ""
+        comment = fio_get_comment(resource_id)
+        asset_id = fio_comment_file_id(comment) or fio_get_comment_file_id(resource_id) or ""
     else:
         return jsonify({"skipped": True, "reason": f"Unsupported resource type '{resource_type}'", "event": event}), 200
 
@@ -893,11 +1020,17 @@ def handle_frameio(request):
             comment_signals=comment_signals,
             review_state=review_state,
         )
+        try:
+            mirror_status = maybe_mirror_frameio_comment_to_notion(page_id, page, event, resource_id, asset_id, comment)
+        except Exception as e:
+            mirror_status = f"error:{e}"
+            logger.warning(f"Notion comment mirror failed for page {page_id}, comment {resource_id}: {e}")
         return jsonify({
             "success": True,
             "event": event,
             "page_id": page_id,
             "counts": counts,
+            "comment_mirror": mirror_status,
             "review_state": {
                 "client_change_round": review_state["client_change_round"],
                 "client_review_open": review_state["client_review_open"],
@@ -919,7 +1052,7 @@ def sync_status(request):
     if request.method == "GET":
         return jsonify({
             "service": "notion-frameio-sync",
-            "version": "2.3.1",
+            "version": "2.3.2",
             "status": "ok",
             "endpoints": ["/notion-webhook", "/frameio-webhook"],
             "mapping": {k: ("ok" if v else "NOT SET") for k, v in STATUS_MAP.items()},

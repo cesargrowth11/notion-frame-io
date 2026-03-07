@@ -17,7 +17,7 @@ Expected shape:
 ```json
 {
   "service": "notion-frameio-sync",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "status": "ok",
   "endpoints": ["/notion-webhook", "/frameio-webhook"],
   "mapping": {
@@ -45,21 +45,22 @@ Common mistakes:
 - using an old function URL after redeploy
 - trailing spaces or an incomplete pasted URL in Notion
 
-## 3. Confirm The Page Has A Frame.io URL
+## 3. Confirm The Page Has A Frame.io Reference
 
 The webhook returns HTTP 200 even when the task cannot be synced.
 
-If the page is missing the Frame.io URL, the function responds with:
+If the page is missing both the explicit asset ID and the Frame.io URL, the function responds with:
 
 ```json
 {
   "skipped": true,
-  "reason": "No Frame.io URL in this task"
+  "reason": "No Frame.io asset reference in this task"
 }
 ```
 
-Check that the Notion page actually contains a valid URL in the property configured as:
+Check that the Notion page actually contains a valid asset reference in one of these properties:
 
+- `Frame Asset ID`
 - `URL Frame.io`
 
 Accepted formats include:
@@ -133,7 +134,7 @@ Important log lines:
 - `Cannot extract asset ID from:` means URL parsing failed
 - `Found asset via project search:` means fallback lookup worked
 - `Frame.io returned 401, attempting token refresh...` means the access token expired
-- `FIO attempt ...` shows the actual Frame.io metadata update attempts and status codes
+- `FIO bulk_update metadata:` shows the actual Frame.io metadata write response and status code
 - `Frame.io error:` means the sync reached Frame.io but failed
 
 ## 7. Interpret The Most Common Failure Modes
@@ -142,7 +143,7 @@ Important log lines:
 
 Most likely:
 
-- missing `URL Frame.io`
+- missing `Frame Asset ID` and `URL Frame.io`
 - status not mapped
 - Notion automation sent too little data and page recovery also failed
 
@@ -170,7 +171,7 @@ Most likely:
 - wrong status value UUID
 - asset does not belong to the expected account/project
 
-Look for the `FIO attempt` logs to see which endpoint/body combination failed.
+Look for the `FIO bulk_update metadata:` log to see the live API response body.
 
 ### Case D: Notion automation fires but the payload is too small
 
@@ -182,7 +183,7 @@ Use this order to avoid wasting time:
 
 1. Hit the health endpoint.
 2. Check that all mappings are `ok`.
-3. Confirm the page has `URL Frame.io`.
+3. Confirm the page has `Frame Asset ID` or `URL Frame.io`.
 4. Trigger the Notion automation and inspect the response body.
 5. If unclear, run the manual `curl` test.
 6. If manual `curl` works, fix Notion automation payload or URL.

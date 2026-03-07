@@ -6,9 +6,12 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-03-07
+
 ### Agregado
 - [BUG-004] **Propiedad explicita `Frame Asset ID` en Notion**: el backend ahora puede leer y persistir un UUID de asset dedicado para enlazar Frame.io -> Notion sin depender solo de la URL.
 - **Senales de revision para RpA**: nuevas propiedades de Notion para `Open Frame Comments`, `Resolved Frame Comments`, `Last Frame Comment`, `Last Frame Comment ID`, `Last Frame Comment At`, `Last Frame Comment Timecode`, `Last Reviewed Version`, `Client Review Open` y `Client Change Round`.
+- **Mirror opcional de comentarios a Notion Comments**: nuevo feature flag `NOTION_ENABLE_FRAME_COMMENT_MIRROR` para publicar `comment.created` como comentario page-level en Notion sin reemplazar el sync estructurado existente.
 
 ### Cambiado
 - [BUG-004] `notion_find_page()` ahora intenta buscar primero por `Frame Asset ID` y usa `URL Frame.io` solo como fallback.
@@ -18,6 +21,8 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - [BUG-005] `fio_get_counts()` ahora toma `Comment Count` desde metadata V4 tolerando `data` como lista u objeto, y deja V2 como apoyo para la logica de versiones.
 - **Review-round sync**: `GET /files/{file_id}/comments` ahora alimenta senales de revision en Notion y una primera logica persistente de `Client Change Round`.
 - [BUG-006] `Cambios Solicitados` sigue sin considerarse una senal confiable de ronda; el contador usa `comment.created` como apertura y `file.versioned` como cierre de ronda.
+- **UI del mirror de comentarios**: el comentario espejado hacia Notion ahora usa rich text con negritas en encabezado y metadatos utiles, y conserva emojis/texto tal como llegan desde Frame.io.
+- **Fix de formato del mirror**: los saltos de linea del comentario espejado ya no se eliminan al construir `rich_text`, evitando que todo quede en una sola linea en Notion.
 
 ### Infraestructura
 - Webhook de Frame.io creado en el workspace `c90b7046-2ad9-4097-bcb4-3a81ee239398` apuntando a `/frameio-webhook`.
@@ -27,6 +32,10 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 ### Documentacion
 - `README.md` y `project_context.md` se alinearon con el modelo actual: Secret Manager, `Frame Asset ID`, senales de comentarios, `Client Change Round`, y el hecho de que `RpA` y `Semaforo RpA` siguen siendo calculados en Notion.
 - `BUGS.md` se consolido como registro operativo para referenciar causas, resoluciones y estado de bugs desde este changelog.
+- Se aclaro explicitamente que `URL Frame.io` sigue siendo el input manual inicial y que `Frame Asset ID` se conserva como cache tecnico estable; no se cambio la logica del runtime para evitar regresiones.
+- Se documento un workflow de branches, PRs, feature flags y rollback para evitar empujar features nuevos directo a `main`.
+
+---
 
 ## [2.3.1] - 2026-03-07
 

@@ -4,7 +4,7 @@
 
 Cloud Function que sincroniza status y senales de revision entre la base `Tareas` de Notion y un proyecto de Frame.io V4.
 
-**Version actual:** 2.3.1  
+**Version actual:** 2.3.2  
 **Estado:** Produccion (deployed)
 
 ## Organizacion
@@ -26,7 +26,7 @@ Frame.io Webhook  -> /frameio-webhook -> Notion property updates
 | Flujo | Trigger | Accion |
 |-------|---------|--------|
 | 1. Notion -> Frame.io | Cambio de `Estado` en Notion | Actualiza `Status` del asset en Frame.io |
-| 2. Frame.io -> Notion | `file.*` o `comment.*` | Actualiza conteos y senales de revision en Notion |
+| 2. Frame.io -> Notion | `file.*` o `comment.*` | Actualiza conteos y senales de revision en Notion y espeja `comment.created` en page comments de Notion |
 | 3. Pull on status change | `/notion-webhook` | Refresca conteos y senales de Frame.io para la tarea |
 
 ## Infraestructura
@@ -110,6 +110,7 @@ notion-frame-io/
   - `POST /databases/{id}/query`
   - `GET /pages/{id}`
   - `PATCH /pages/{id}`
+  - `POST /comments` cuando `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true`
 
 ## Base de Datos Notion: `Tareas`
 
@@ -138,9 +139,11 @@ notion-frame-io/
 
 ### Estrategia de asociacion
 
-- Primero se busca por `Frame Asset ID`
-- Si no existe, fallback a `URL Frame.io`
-- Cuando la funcion identifica una pagina, persiste `Frame Asset ID`
+- El input manual inicial en Notion sigue siendo `URL Frame.io`
+- Desde esa URL la funcion intenta extraer o resolver el `asset_id`
+- Una vez identificada la asociacion, la funcion persiste `Frame Asset ID`
+- En runtime se prioriza `Frame Asset ID` como clave tecnica estable
+- `URL Frame.io` queda como bootstrap/fallback y referencia operativa para el usuario
 
 ## Mapeo de status
 
@@ -211,6 +214,7 @@ notion-frame-io/
 - `NOTION_PROP_LAST_REVIEWED_VERSION`
 - `NOTION_PROP_CLIENT_REVIEW_OPEN`
 - `NOTION_PROP_CHANGE_ROUND`
+- `NOTION_ENABLE_FRAME_COMMENT_MIRROR`
 
 ### Frame.io
 
@@ -261,7 +265,9 @@ notion-frame-io/
 ### Notion payload parsing
 
 - `parse_notion_payload()` lee desde `data` y `data.properties`
-- usa `Frame Asset ID` antes que la URL
+- acepta `Frame Asset ID` y `URL Frame.io`
+- en la operacion del equipo, la URL sigue siendo el punto de entrada manual
+- el runtime mantiene `Frame Asset ID` como referencia estable una vez cacheada para no introducir regresiones
 - si faltan propiedades, usa `notion_get_page(page_id)`
 
 ### Token refresh
@@ -275,6 +281,18 @@ notion-frame-io/
 - V2 se usa para la logica de versiones/version stacks
 - `fio_get_comment_signals()` extrae ultimo comentario y abiertos/resueltos
 - `notion_calculate_review_state()` mantiene `Client Change Round`
+- `maybe_mirror_frameio_comment_to_notion()` puede publicar `comment.created` en los comentarios nativos de Notion sin reemplazar el modelo estructurado
+- el mirror usa rich text para mejorar legibilidad visual y mantiene el texto del comentario tal como llega, incluidos emojis
+- el helper de rich text del mirror preserva saltos de linea para mantener estructura visual en Notion
+
+## GitHub release workflow
+
+- `main` se mantiene como rama estable y desplegable
+- cada feature nueva debe vivir en su propia rama, por ejemplo `feature/notion-comment-mirror`
+- el trabajo se valida en branch con feature flags apagados por defecto antes de abrir PR
+- `CHANGELOG.md` se actualiza en `Unreleased` mientras la feature no este publicada
+- solo despues de validar que nada se rompio se mergea a `main`, se despliega y se crea tag de version
+- si aparece una regresion, el primer rollback es apagar el feature flag; el segundo es revertir el PR
 
 ## Deploy
 

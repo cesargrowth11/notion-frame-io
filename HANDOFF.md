@@ -152,6 +152,127 @@
   - `Cambios Solicitados` was re-tested and still is not a reliable signal; documented as open `BUG-006`
   - Updating the existing Frame.io webhook to include `comment.completed` / `comment.uncompleted` did not visibly change the subscribed events; this remains a follow-up task
 
+## 2026-03-07 14:09 America/Santiago - Codex
+
+- Task: Review the full repository context and align stale docs with runtime `2.3.1`
+- Files changed: `main.py`, `TROUBLESHOOTING.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed `README.md`, `project_context.md`, `CHANGELOG.md`, `BUGS.md`, `TASKS.md`, `HANDOFF.md`, `main.py`, `deploy.sh`, `requirements.txt`, and the helper scripts
+  - Confirmed `main.py` health endpoint reports `version: 2.3.1`
+  - Confirmed `TROUBLESHOOTING.md` had stale `2.3.0` output and old log/message wording, then aligned it to the current asset-reference flow
+- Notes:
+  - `.env.yaml` and `env.yaml` were intentionally not opened to avoid reading secrets
+  - Remaining open runtime follow-ups are still `BUG-006` and the webhook expansion to `comment.completed` / `comment.uncompleted`
+
+## 2026-03-07 14:25 America/Santiago - Codex
+
+- Task: Clarify the association model without changing runtime behavior
+- Files changed: `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed the current runtime behavior in `main.py`
+  - Confirmed no code changes were made
+  - Confirmed the docs now state that `URL Frame.io` is the manual bootstrap input and `Frame Asset ID` is the cached stable reference used to avoid regressions
+- Notes:
+  - `BUG-006` remains deferred by explicit decision
+  - This session intentionally avoided changing precedence or webhook behavior to preserve the currently working flow
+
+## 2026-03-07 14:47 America/Santiago - Codex
+
+- Task: Add optional Frame.io comment mirror into Notion page comments with safe rollout workflow
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Implemented `NOTION_ENABLE_FRAME_COMMENT_MIRROR` with default disabled behavior
+  - Added page-level comment creation in Notion only for `comment.created`
+  - Kept the existing property sync path intact and made comment mirror failures non-fatal
+  - Documented GitHub branch, PR, tag, flag, and rollback workflow for safe release management
+- Notes:
+  - The feature is additive and should not change runtime behavior while the flag remains off
+  - The Notion integration still needs comment insertion capability in the target workspace when the flag is enabled
+
+## 2026-03-07 15:02 America/Santiago - Codex
+
+- Task: Live-test the optional Notion comment mirror and return production to the safe default
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Deployed branch `feature/notion-comment-mirror` to the live function with the flag disabled and confirmed `comment_mirror: "disabled"` on a real `comment.created` webhook for comment `94d227ae-6341-4b0e-9e80-d9947eb29207`
+  - Redeployed with `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true` using a temporary env file and confirmed the same webhook returned `comment_mirror: "created"`
+  - Verified directly in Notion that page `31839c2f-efe7-81dd-8bd3-ca760c9a7a63` received a new page-level comment with the mirrored Frame.io payload
+  - Redeployed again with the default `.env.yaml` and confirmed the live function returned `comment_mirror: "disabled"` after the test
+- Notes:
+  - Production was left with the mirror feature disabled
+  - Temporary file `.env.comment-mirror.yaml` was removed after the validation
+  - The tested mirror path is functional and can be enabled later without code changes
+
+## 2026-03-07 15:10 America/Santiago - Codex
+
+- Task: Improve the mirrored Notion comment formatting for better UX
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `HANDOFF.md`
+- Verification:
+  - Updated the mirror formatter to use Notion rich text annotations for bold labels/headings
+  - Removed internal IDs from the visible comment body
+  - Preserved the incoming comment text as-is so emojis can flow through to Notion
+- Notes:
+  - No sync logic or feature-flag behavior changed
+  - The next live validation should use a fresh `comment.created` event to inspect the updated visual formatting in Notion
+
+## 2026-03-07 15:13 America/Santiago - Codex
+
+- Task: Promote the Notion comment mirror to production
+- Files changed: `HANDOFF.md`
+- Verification:
+  - Deployed the current `feature/notion-comment-mirror` code to the live Cloud Function with `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true`
+  - Confirmed the health endpoint still returns `status: ok`, `version: 2.3.1`, and all four status mappings as `ok`
+- Notes:
+  - Production is now running with the comment mirror enabled
+  - Temporary local file `.env.comment-mirror.yaml` was removed after deploy
+  - The UX formatter change is deployed, but it still needs a fresh real `comment.created` event to visually validate the new bold layout and emoji rendering in Notion
+
+## 2026-03-07 15:17 America/Santiago - Codex
+
+- Task: Fix collapsed line breaks in the mirrored Notion comment UI
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `HANDOFF.md`
+- Verification:
+  - Identified that `_notion_rich_text_objects()` was stripping leading/trailing whitespace and removing intended `\n` separators
+  - Updated the helper to preserve newline-only fragments used by the comment formatter
+- Notes:
+  - This is a presentation-only fix for the mirrored comment body
+  - A fresh `comment.created` event is still required to visually validate the corrected layout in production
+
+## 2026-03-07 15:20 America/Santiago - Codex
+
+- Task: Deploy the mirrored comment line-break hotfix to production
+- Files changed: `HANDOFF.md`
+- Verification:
+  - Deployed the current branch to the live Cloud Function with `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true`
+  - Confirmed the health endpoint still returns `status: ok`, `version: 2.3.1`, and all four status mappings as `ok`
+- Notes:
+  - Production is still running with the comment mirror enabled
+  - Temporary local file `.env.comment-mirror.yaml` was removed after deploy
+  - The next fresh `comment.created` event should now render with preserved line breaks in Notion
+
+## 2026-03-07 15:28 America/Santiago - Codex
+
+- Task: Finalize release documentation for the production-enabled Notion comment mirror
+- Files changed: `main.py`, `CHANGELOG.md`, `README.md`, `project_context.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Updated the health endpoint version string to `2.3.2`
+  - Converted the shipped mirror work from `Unreleased` into release `2.3.2`
+  - Aligned README, project context, tasks, and handoff with the fact that the mirror is now enabled in production
+- Notes:
+  - Production release documentation now matches the deployed behavior
+
+## 2026-03-07 15:24 America/Santiago - Codex
+
+- Task: Deploy the final `2.3.2` release metadata to production
+- Files changed: `HANDOFF.md`
+- Verification:
+  - Deployed the current branch to the live Cloud Function with `NOTION_ENABLE_FRAME_COMMENT_MIRROR=true`
+  - Confirmed the health endpoint now reports `version: 2.3.2`
+  - Confirmed the health endpoint still returns `status: ok` and all four status mappings as `ok`
+- Notes:
+  - Production is running the documented `2.3.2` release with the Notion comment mirror enabled
+  - Temporary local file `.env.comment-mirror.yaml` was removed after deploy
+
 ## Template
 
 Copy this block for the next handoff:
