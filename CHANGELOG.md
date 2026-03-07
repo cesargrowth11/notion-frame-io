@@ -4,6 +4,23 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 
 ---
 
+## [2.3.0] - 2026-03-07
+
+### Agregado
+- **Patron explicito para `next.frame.io`**: Nueva regex `next\.frame\.io/project/[^/]+/view/([a-f0-9\-]{36})` que extrae el asset ID directamente del final de URLs de vista. Confirmado con asset `DRYP_30_FINAL_9x16.mp4` (ID: `7f289cd4-b30e-4103-91c8-48042497683a`).
+- **Normalizacion Unicode de status**: Funcion `_normalize_text()` que elimina acentos y normaliza espacios/mayusculas antes de comparar status. Esto permite que "Listo para revision" matchee con "Listo para revisión" (con tilde).
+- **Mapa de status normalizado**: `_NORMALIZED_STATUS_MAP` pre-computa las claves normalizadas al inicio para evitar recalcular en cada request.
+- **Funcion `_status_uuid_for()`**: Reemplaza la comparacion directa `status in STATUS_MAP` por busqueda normalizada.
+- **Recuperacion de propiedades faltantes**: `notion_get_page()` obtiene la pagina completa de Notion cuando el webhook no incluye todas las propiedades (ej: falta URL o status).
+- **Parser de payload mejorado**: `parse_notion_payload()` ahora busca propiedades en `data` y tambien en `data.properties` como fallback, cubriendo mas formatos de webhook.
+- Documentacion: `project_context.md` y `CHANGELOG.md`.
+
+### Cambiado
+- `handle_notion()` ahora intenta recuperar `asset_id` y `status` via API de Notion si el webhook no los incluye.
+- El matching de status usa `_status_uuid_for()` en lugar de acceso directo a `STATUS_MAP`.
+
+---
+
 ## [2.2.0] - 2026-03-07
 
 ### Agregado

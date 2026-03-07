@@ -4,7 +4,7 @@
 
 Cloud Function que sincroniza bidirecionalmente el status y metricas de assets entre una base de datos de Notion ("Tareas") y Frame.io V4. Desarrollado para el pipeline de produccion de **Globe Studio** dentro de **Efeonce Group**.
 
-**Version actual:** 2.2.0
+**Version actual:** 2.3.0
 **Estado:** Produccion (deployed)
 
 ---
@@ -136,6 +136,7 @@ notion-frame-io/
 | Listo | Approved / Final | `FRAMEIO_STATUS_APPROVED` |
 
 Cada status de Frame.io se identifica por un UUID configurado en `.env.yaml`.
+El matching de status normaliza acentos, mayusculas/minusculas y espacios antes de resolver el UUID de Frame.io.
 
 ---
 
@@ -186,7 +187,14 @@ Extrae el asset ID de Frame.io de cualquier formato de URL:
 - URLs acortadas: `f.io/xxx`, `fio.co/xxx` — resuelve via HTTP HEAD redirect
 - URLs de vista: `next.frame.io/.../view/...` — busca asset en el arbol del proyecto
 - Fallback: busqueda recursiva en children del proyecto comparando `view_url`
+- Si la URL es `next.frame.io/project/.../view/{uuid}`, el asset ID se extrae directamente via regex
+- Si la URL de vista no trae el asset ID de forma directa, se usa busqueda por proyecto como fallback
 - UUID directo: acepta un UUID sin URL
+
+### Parser de Webhook de Notion
+- `parse_notion_payload()` intenta leer propiedades tanto desde `data` como desde `data.properties`
+- Si el webhook no incluye URL o status, `notion_get_page()` consulta la pagina completa en Notion usando `page_id`
+- Esto hace el flujo mas tolerante a payloads minimos enviados por Notion Automations
 
 ### Token Auto-Refresh
 - Todas las llamadas a Frame.io pasan por `_fio_request()`
@@ -229,7 +237,7 @@ Respuesta esperada:
 ```json
 {
   "service": "notion-frameio-sync",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "status": "ok",
   "endpoints": ["/notion-webhook", "/frameio-webhook"],
   "mapping": {

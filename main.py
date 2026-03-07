@@ -43,6 +43,10 @@ _tokens = {
     "client_secret": os.environ.get("FRAMEIO_CLIENT_SECRET", ""),
 }
 
+# Secret Manager config
+_SM_ACCESS_SECRET = os.environ.get("SM_ACCESS_SECRET", "frameio-access-token")
+_SM_REFRESH_SECRET = os.environ.get("SM_REFRESH_SECRET", "frameio-refresh-token")
+
 # Notion
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "3a54f0904be14158833533ba96557a73")
@@ -84,11 +88,51 @@ def _status_uuid_for(status: str | None) -> str:
 # =============================================
 
 _ADOBE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/token/v3"
-_GCF_FUNCTION_NAME = os.environ.get(
-    "K_SERVICE", "notion-frameio-sync"
-)
-_GCF_REGION = os.environ.get("FUNCTION_REGION", "us-central1")
 _GCP_PROJECT = os.environ.get("GCP_PROJECT", os.environ.get("GCLOUD_PROJECT", "efeonce-group"))
+
+
+def _read_secret(secret_id: str) -> str | None:
+    """Read the latest version of a secret from Secret Manager."""
+    try:
+        from google.cloud import secretmanager
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{_GCP_PROJECT}/secrets/{secret_id}/versions/latest"
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.warning(f"Could not read secret {secret_id}: {e}")
+        return None
+
+
+def _write_secret(secret_id: str, value: str):
+    """Add a new version of a secret in Secret Manager."""
+    try:
+        from google.cloud import secretmanager
+        client = secretmanager.SecretManagerServiceClient()
+        parent = f"projects/{_GCP_PROJECT}/secrets/{secret_id}"
+        client.add_secret_version(
+            request={"parent": parent, "payload": {"data": value.encode("UTF-8")}}
+        )
+        logger.info(f"Secret {secret_id} updated in Secret Manager")
+    except Exception as e:
+        logger.warning(f"Could not write secret {secret_id}: {e}")
+
+
+def _load_tokens_from_secrets():
+    """Load tokens from Secret Manager, falling back to env vars."""
+    access = _read_secret(_SM_ACCESS_SECRET)
+    if access:
+        _tokens["access_token"] = access
+        logger.info("Loaded access_token from Secret Manager")
+
+    refresh = _read_secret(_SM_REFRESH_SECRET)
+    if refresh:
+        _tokens["refresh_token"] = refresh
+        logger.info("Loaded refresh_token from Secret Manager")
+
+
+# Load tokens from Secret Manager on cold start
+_load_tokens_from_secrets()
 
 
 def _refresh_access_token() -> str | None:
@@ -120,36 +164,11 @@ def _refresh_access_token() -> str | None:
     _tokens["refresh_token"] = new_refresh
     logger.info("Token refreshed successfully")
 
-    # Persist new tokens to Cloud Function env vars
-    _update_cloud_function_env(new_access, new_refresh)
+    # Persist new tokens to Secret Manager
+    _write_secret(_SM_ACCESS_SECRET, new_access)
+    _write_secret(_SM_REFRESH_SECRET, new_refresh)
 
     return new_access
-
-
-def _update_cloud_function_env(new_access: str, new_refresh: str):
-    """Update the Cloud Function's environment variables with new tokens."""
-    try:
-        from google.cloud.functions_v2 import FunctionServiceClient, UpdateFunctionRequest
-        from google.cloud.functions_v2.types import Function
-        from google.protobuf import field_mask_pb2
-
-        client = FunctionServiceClient()
-        func_name = f"projects/{_GCP_PROJECT}/locations/{_GCF_REGION}/functions/{_GCF_FUNCTION_NAME}"
-
-        function = client.get_function(name=func_name)
-        env_vars = dict(function.service_config.environment_variables)
-        env_vars["FRAMEIO_ACCESS_TOKEN"] = new_access
-        env_vars["FRAMEIO_REFRESH_TOKEN"] = new_refresh
-        function.service_config.environment_variables = env_vars
-
-        update_request = UpdateFunctionRequest(
-            function=function,
-            update_mask=field_mask_pb2.FieldMask(paths=["service_config.environment_variables"]),
-        )
-        operation = client.update_function(request=update_request)
-        logger.info(f"Cloud Function env update started: {operation.metadata}")
-    except Exception as e:
-        logger.warning(f"Could not update Cloud Function env vars (tokens refreshed in memory only): {e}")
 
 
 def _fio_request(method: str, url: str, **kwargs) -> requests.Response:
@@ -293,10 +312,33 @@ _FIO = "https://api.frame.io"
 
 
 def fio_update_status(asset_id: str, status_uuid: str):
-    url = f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/projects/{FRAMEIO_PROJECT_ID}/metadata/values"
-    body = {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}
-    r = _fio_request("PATCH", url, json=body, timeout=30)
-    logger.info(f"Frame.io PATCH status: {r.status_code}")
+    # List of endpoint/body combinations to try
+    attempts = [
+        # 1) Account-level metadata values
+        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
+         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
+        # 2) Project-level metadata values
+        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/projects/{FRAMEIO_PROJECT_ID}/metadata/values",
+         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
+        # 3) Account-level without data wrapper
+        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
+         {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}),
+        # 4) POST instead of PATCH
+        ("POST", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
+         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
+    ]
+
+    r = None
+    for i, (method, url, body) in enumerate(attempts, 1):
+        r = _fio_request(method, url, json=body, timeout=10)
+        short_url = url.split("/v4/")[-1]
+        logger.warning(f"FIO attempt {i} ({method} {short_url}): {r.status_code} resp={r.text[:200]}")
+        if r.status_code < 400:
+            logger.warning(f"FIO status update SUCCESS on attempt {i}")
+            return r.json()
+        if r.status_code not in (404, 405, 422):
+            break
+
     r.raise_for_status()
     return r.json()
 
