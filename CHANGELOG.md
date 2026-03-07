@@ -4,29 +4,68 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 
 ---
 
+## [Unreleased]
+
+### Agregado
+- [BUG-004] **Propiedad explicita `Frame Asset ID` en Notion**: el backend ahora puede leer y persistir un UUID de asset dedicado para enlazar Frame.io -> Notion sin depender solo de la URL.
+- **Senales de revision para RpA**: nuevas propiedades de Notion para `Open Frame Comments`, `Resolved Frame Comments`, `Last Frame Comment`, `Last Frame Comment ID`, `Last Frame Comment At`, `Last Frame Comment Timecode`, `Last Reviewed Version`, `Client Review Open` y `Client Change Round`.
+
+### Cambiado
+- [BUG-004] `notion_find_page()` ahora intenta buscar primero por `Frame Asset ID` y usa `URL Frame.io` solo como fallback.
+- [BUG-004] `parse_notion_payload()` ahora acepta `Frame Asset ID` en el payload de Notion antes de intentar parsear la URL.
+- [BUG-004] Al actualizar `Frame Versions` y `Frame Comments`, la funcion tambien intenta cachear `Frame Asset ID` en la pagina si el schema lo permite.
+- `handle_frameio()` ahora resuelve `file_id` desde `comment_id` para eventos `comment.*` usando `GET /v4/accounts/{account_id}/comments/{comment_id}`.
+- [BUG-005] `fio_get_counts()` ahora toma `Comment Count` desde metadata V4 tolerando `data` como lista u objeto, y deja V2 como apoyo para la logica de versiones.
+- **Review-round sync**: `GET /files/{file_id}/comments` ahora alimenta senales de revision en Notion y una primera logica persistente de `Client Change Round`.
+- [BUG-006] `Cambios Solicitados` sigue sin considerarse una senal confiable de ronda; el contador usa `comment.created` como apertura y `file.versioned` como cierre de ronda.
+
+### Infraestructura
+- Webhook de Frame.io creado en el workspace `c90b7046-2ad9-4097-bcb4-3a81ee239398` apuntando a `/frameio-webhook`.
+- Eventos suscritos: `file.created`, `file.versioned`, `comment.created`, `comment.deleted`.
+- [BUG-003] Se agrego `roles/secretmanager.secretAccessor` a la service account de la Cloud Function para leer tokens desde Secret Manager en cold start.
+
+### Documentacion
+- `README.md` y `project_context.md` se alinearon con el modelo actual: Secret Manager, `Frame Asset ID`, senales de comentarios, `Client Change Round`, y el hecho de que `RpA` y `Semaforo RpA` siguen siendo calculados en Notion.
+- `BUGS.md` se consolido como registro operativo para referenciar causas, resoluciones y estado de bugs desde este changelog.
+
+## [2.3.1] - 2026-03-07
+
+### Cambiado
+- [BUG-003] **Persistencia de tokens migrada a Secret Manager**: reemplaza `_update_cloud_function_env()` (que fallaba con 403) por `_read_secret()` y `_write_secret()` usando Google Cloud Secret Manager.
+- [BUG-003] Los tokens se cargan desde Secret Manager al cold start (`_load_tokens_from_secrets()`), con fallback a env vars.
+- [BUG-003] Al refrescar tokens via Adobe IMS, se persisten como nuevas versiones en Secret Manager.
+- Secrets: `frameio-access-token`, `frameio-refresh-token`.
+- Dependencia: `google-cloud-secret-manager>=2.0` reemplaza `google-cloud-functions>=1.0`.
+
+### Eliminado
+- `_update_cloud_function_env()`: ya no se actualizan env vars de la Cloud Function via GCP API.
+- Variables `_GCF_FUNCTION_NAME`, `_GCF_REGION`: ya no son necesarias.
+
+---
+
 ## [2.3.0] - 2026-03-07
 
 ### Agregado
-- **Patron explicito para `next.frame.io`**: Nueva regex `next\.frame\.io/project/[^/]+/view/([a-f0-9\-]{36})` que extrae el asset ID directamente del final de URLs de vista. Confirmado con asset `DRYP_30_FINAL_9x16.mp4` (ID: `7f289cd4-b30e-4103-91c8-48042497683a`).
-- **Normalizacion Unicode de status**: Funcion `_normalize_text()` que elimina acentos y normaliza espacios/mayusculas antes de comparar status. Esto permite que "Listo para revision" matchee con "Listo para revisión" (con tilde).
-- **Mapa de status normalizado**: `_NORMALIZED_STATUS_MAP` pre-computa las claves normalizadas al inicio para evitar recalcular en cada request.
-- **Funcion `_status_uuid_for()`**: Reemplaza la comparacion directa `status in STATUS_MAP` por busqueda normalizada.
-- **Recuperacion de propiedades faltantes**: `notion_get_page()` obtiene la pagina completa de Notion cuando el webhook no incluye todas las propiedades (ej: falta URL o status).
-- **Parser de payload mejorado**: `parse_notion_payload()` ahora busca propiedades en `data` y tambien en `data.properties` como fallback, cubriendo mas formatos de webhook.
+- **Patron explicito para `next.frame.io`**: nueva regex `next\.frame\.io/project/[^/]+/view/([a-f0-9\-]{36})` que extrae el asset ID directamente del final de URLs de vista. Confirmado con asset `DRYP_30_FINAL_9x16.mp4` (ID: `7f289cd4-b30e-4103-91c8-48042497683a`).
+- [BUG-001] **Normalizacion Unicode de status**: funcion `_normalize_text()` que elimina acentos y normaliza espacios/mayusculas antes de comparar status. Esto permite que `Listo para revision` matchee con `Listo para revision` con o sin tilde.
+- [BUG-001] **Mapa de status normalizado**: `_NORMALIZED_STATUS_MAP` pre-computa las claves normalizadas al inicio para evitar recalcular en cada request.
+- [BUG-001] **Funcion `_status_uuid_for()`**: reemplaza la comparacion directa `status in STATUS_MAP` por busqueda normalizada.
+- [BUG-002] **Recuperacion de propiedades faltantes**: `notion_get_page()` obtiene la pagina completa de Notion cuando el webhook no incluye todas las propiedades, por ejemplo si falta URL o status.
+- [BUG-002] **Parser de payload mejorado**: `parse_notion_payload()` ahora busca propiedades en `data` y tambien en `data.properties` como fallback, cubriendo mas formatos de webhook.
 - Documentacion: `project_context.md` y `CHANGELOG.md`.
 
 ### Cambiado
-- `handle_notion()` ahora intenta recuperar `asset_id` y `status` via API de Notion si el webhook no los incluye.
-- El matching de status usa `_status_uuid_for()` en lugar de acceso directo a `STATUS_MAP`.
+- [BUG-002] `handle_notion()` ahora intenta recuperar `asset_id` y `status` via API de Notion si el webhook no los incluye.
+- [BUG-001] El matching de status usa `_status_uuid_for()` en lugar de acceso directo a `STATUS_MAP`.
 
 ---
 
 ## [2.2.0] - 2026-03-07
 
 ### Agregado
-- **Resolucion de URLs acortadas**: Soporte para URLs `f.io/xxx` y `fio.co/xxx` via HTTP HEAD con `allow_redirects=True` para resolver la URL final antes de extraer el asset ID.
-- **Soporte para URLs de vista**: Manejo de URLs `next.frame.io/project/.../view/...` donde el view ID no es un asset ID. Se busca el asset recorriendo los children del proyecto.
-- **Fallback de busqueda por proyecto**: Si la URL contiene "frame.io" pero no matchea ningun patron conocido, se recorre el arbol de assets del proyecto (hasta 2 niveles) comparando `view_url` y `original_url` contra la URL de Notion.
+- **Resolucion de URLs acortadas**: soporte para URLs `f.io/xxx` y `fio.co/xxx` via HTTP HEAD con `allow_redirects=True` para resolver la URL final antes de extraer el asset ID.
+- **Soporte para URLs de vista**: manejo de URLs `next.frame.io/project/.../view/...` donde el view ID no es un asset ID. Se busca el asset recorriendo los children del proyecto.
+- **Fallback de busqueda por proyecto**: si la URL contiene `frame.io` pero no matchea ningun patron conocido, se recorre el arbol de assets del proyecto hasta 2 niveles comparando `view_url` y `original_url` contra la URL de Notion.
 - Funciones internas: `_resolve_short_url()`, `_search_project_for_url()`, `_search_children_for_url()`.
 
 ---
@@ -34,8 +73,8 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 ## [2.1.0] - 2026-03-07
 
 ### Agregado
-- **Auto-refresh de tokens OAuth**: Cuando Frame.io responde 401, el sistema automaticamente intercambia el `refresh_token` por un nuevo `access_token` via Adobe IMS (`/ims/token/v3`).
-- **Persistencia de tokens**: Los nuevos tokens se persisten en las variables de entorno de la Cloud Function via la API de Google Cloud Functions v2, evitando perder el token en el proximo cold start.
+- **Auto-refresh de tokens OAuth**: cuando Frame.io responde 401, el sistema automaticamente intercambia el `refresh_token` por un nuevo `access_token` via Adobe IMS (`/ims/token/v3`).
+- **Persistencia de tokens**: los nuevos tokens se persisten en las variables de entorno de la Cloud Function via la API de Google Cloud Functions v2, evitando perder el token en el proximo cold start.
 - Wrapper `_fio_request()` que encapsula todas las llamadas a Frame.io con retry automatico en 401.
 - Funcion `_refresh_access_token()` para el flujo OAuth con Adobe IMS.
 - Funcion `_update_cloud_function_env()` para persistir tokens via GCP API.
@@ -51,15 +90,15 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 
 ### Agregado
 - **Sync bidireccional completo** entre Notion y Frame.io V4.
-- **Flujo 1 (Notion -> Frame.io)**: Cambio de status en Notion dispara webhook que actualiza el status del asset en Frame.io via metadata values API (V4).
-- **Flujo 2 (Frame.io -> Notion)**: Webhook de Frame.io (`file.created`, `comment.created`) actualiza conteos de versiones y comentarios en Notion.
-- **Flujo 3 (Pull on status change)**: Al cambiar status en Notion, tambien se traen los conteos de Frame.io de vuelta a Notion en la misma ejecucion.
-- Parser de URLs de Frame.io con soporte para multiples formatos: player, reviews, projects, asset directo.
+- **Flujo 1 (Notion -> Frame.io)**: cambio de status en Notion dispara webhook que actualiza el status del asset en Frame.io via metadata values API (V4).
+- **Flujo 2 (Frame.io -> Notion)**: webhook de Frame.io (`file.created`, `comment.created`) actualiza conteos de versiones y comentarios en Notion.
+- **Flujo 3 (Pull on status change)**: al cambiar status en Notion, tambien se traen los conteos de Frame.io de vuelta a Notion en la misma ejecucion.
+- Parser de URLs de Frame.io con soporte para multiples formatos: player, reviews, projects y asset directo.
 - Conteo inteligente de versiones: detecta version stacks y suma versiones de todos los children.
 - Conteo de comentarios: suma `comment_count` de todas las versiones en un version stack.
-- Mapeo de 4 status: En curso, Listo para revision, Cambios Solicitados, Listo.
-- Health check en GET `/` con estado del mapping y version.
-- Respuesta 200 con `{"skipped": true}` cuando la tarea no tiene URL de Frame.io (evita que Notion pause la automatizacion).
+- Mapeo de 4 status: `En curso`, `Listo para revision`, `Cambios Solicitados`, `Listo`.
+- Health check en `GET /` con estado del mapping y version.
+- Respuesta 200 con `{"skipped": true}` cuando la tarea no tiene URL de Frame.io, evitando que Notion pause la automatizacion.
 - Script `deploy.sh` para deploy a GCP con un solo comando.
 - Script `generate_frameio_token.py` para generar tokens OAuth de Frame.io V4.
 - Script `get_frameio_status_uuids.py` para descubrir UUIDs de metadata fields.

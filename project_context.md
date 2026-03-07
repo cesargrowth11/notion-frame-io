@@ -2,43 +2,32 @@
 
 ## Descripcion General
 
-Cloud Function que sincroniza bidirecionalmente el status y metricas de assets entre una base de datos de Notion ("Tareas") y Frame.io V4. Desarrollado para el pipeline de produccion de **Globe Studio** dentro de **Efeonce Group**.
+Cloud Function que sincroniza status y senales de revision entre la base `Tareas` de Notion y un proyecto de Frame.io V4.
 
-**Version actual:** 2.3.0
+**Version actual:** 2.3.1  
 **Estado:** Produccion (deployed)
-
----
 
 ## Organizacion
 
-- **Empresa:** Efeonce Group SpA
-- **Unidad:** Globe Studio
-- **Pipeline:** Post-produccion de contenido audiovisual
-- **Repositorio:** https://github.com/cesargrowth11/notion-frame-io.git
-
----
+- Empresa: Efeonce Group SpA
+- Unidad: Globe Studio
+- Pipeline: Post-produccion de contenido audiovisual
+- Repositorio: https://github.com/cesargrowth11/notion-frame-io.git
 
 ## Arquitectura
 
-```
-                          +-------------------------+
-  +------------+  POST    |                         |  PATCH    +------------+
-  |            |--------->|   Cloud Function (GCP)  |---------->|            |
-  |  Notion DB |          |   /notion-webhook       |           | Frame.io   |
-  |  "Tareas"  |<---------|                         |<----------|  V4 API    |
-  |            |  UPDATE   |   /frameio-webhook      |  GET      |            |
-  +------------+  counts  +-------------------------+  counts   +------------+
+```text
+Notion Automation -> /notion-webhook -> Frame.io status update + pull de senales
+Frame.io Webhook  -> /frameio-webhook -> Notion property updates
 ```
 
 ### Flujos de datos
 
 | Flujo | Trigger | Accion |
 |-------|---------|--------|
-| 1. Notion -> Frame.io | Status cambia en Notion | Webhook POST a `/notion-webhook`, actualiza status en Frame.io via metadata values API |
-| 2. Frame.io -> Notion | Nueva version o comentario en Frame.io | Webhook POST a `/frameio-webhook`, actualiza conteos en Notion |
-| 3. Pull on status change | Status cambia en Notion | Ademas de Flujo 1, trae conteos de Frame.io de vuelta a Notion |
-
----
+| 1. Notion -> Frame.io | Cambio de `Estado` en Notion | Actualiza `Status` del asset en Frame.io |
+| 2. Frame.io -> Notion | `file.*` o `comment.*` | Actualiza conteos y senales de revision en Notion |
+| 3. Pull on status change | `/notion-webhook` | Refresca conteos y senales de Frame.io para la tarea |
 
 ## Infraestructura
 
@@ -50,173 +39,245 @@ Cloud Function que sincroniza bidirecionalmente el status y metricas de assets e
 | Proyecto GCP | efeonce-group |
 | Memoria | 256 MB |
 | Timeout | 60s |
-| Instancias | 0-10 (auto-scale) |
+| Instancias | 0-10 |
 | URL publica | `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync` |
 | Entry point | `sync_status` |
 
----
+## Archivos principales
 
-## Estructura de archivos
-
-```
+```text
 notion-frame-io/
-+-- main.py                      # Cloud Function principal (toda la logica)
-+-- requirements.txt             # Dependencias Python
-+-- .env.yaml                    # Variables de entorno (SECRETO, gitignored)
-+-- deploy.sh                    # Script de deploy a GCP
-+-- generate_frameio_token.py    # Helper: generar OAuth token de Frame.io V4
-+-- get_frameio_status_uuids.py  # Helper: descubrir UUIDs de metadata fields
-+-- .gitignore                   # Excluye secrets y archivos temporales
-+-- .gcloudignore                # Generado por gcloud deploy
-+-- README.md                    # Documentacion de uso
-+-- CHANGELOG.md                 # Historial de cambios (ver detalle)
-+-- project_context.md           # Este archivo
++-- main.py
++-- requirements.txt
++-- .env.yaml
++-- deploy.sh
++-- generate_frameio_token.py
++-- get_frameio_status_uuids.py
++-- README.md
++-- CHANGELOG.md
++-- BUGS.md
++-- TASKS.md
++-- HANDOFF.md
++-- project_context.md
 ```
 
----
-
-## Dependencias (requirements.txt)
+## Dependencias
 
 | Paquete | Version | Uso |
 |---------|---------|-----|
-| functions-framework | 3.* | Framework de Google Cloud Functions |
-| flask | >=2.0 | HTTP request/response (viene con functions-framework) |
-| requests | >=2.28 | Llamadas HTTP a Frame.io y Notion APIs |
-| google-cloud-functions | >=1.0 | Persistir tokens en env vars de la Cloud Function |
-
----
+| functions-framework | 3.* | Runtime HTTP de Cloud Functions |
+| flask | >=2.0 | `jsonify` y capa HTTP |
+| requests | >=2.28 | Llamadas HTTP a Notion y Frame.io |
+| google-cloud-secret-manager | >=2.0 | Lectura/escritura de tokens OAuth |
 
 ## APIs y Servicios Externos
 
-### Frame.io V4 API
-- **Base URL:** `https://api.frame.io`
-- **Autenticacion:** OAuth 2.0 Bearer token (Adobe IMS)
-- **Endpoints usados:**
-  - `PATCH /v4/accounts/{id}/projects/{id}/metadata/values` — Actualizar status de asset
-  - `GET /v2/assets/{id}` — Obtener info de asset (comment_count, type, parent_id)
-  - `GET /v2/assets/{id}/children` — Listar children de un asset (version stacks, folders)
-  - `GET /v2/projects/{id}` — Obtener info del proyecto (root_asset_id)
+### Frame.io API
 
-### Adobe IMS (Token Refresh)
-- **URL:** `https://ims-na1.adobelogin.com/ims/token/v3`
-- **Flujo:** `grant_type=refresh_token` con client_id + client_secret
-- **Auto-refresh:** Cuando Frame.io responde 401, se intenta refresh automaticamente
+- Base URL: `https://api.frame.io`
+- Auth: OAuth 2.0 Bearer token via Adobe IMS
+- Endpoints usados:
+  - `PATCH /v4/accounts/{account_id}/projects/{project_id}/metadata/values`
+  - `GET /v4/accounts/{account_id}/files/{file_id}/metadata`
+  - `GET /v4/accounts/{account_id}/files/{file_id}/comments`
+  - `GET /v4/accounts/{account_id}/comments/{comment_id}`
+  - `GET /v2/assets/{asset_id}`
+  - `GET /v2/assets/{asset_id}/children`
+  - `GET /v2/projects/{project_id}`
+
+### Adobe IMS
+
+- URL: `https://ims-na1.adobelogin.com/ims/token/v3`
+- Uso: refresh automatico cuando Frame.io responde `401`
+
+### Google Cloud Secret Manager
+
+- Secrets default:
+  - `frameio-access-token`
+  - `frameio-refresh-token`
+- Uso:
+  - leer tokens al cold start
+  - persistir nuevas versiones tras refresh
+- IAM necesario en la service account:
+  - `roles/secretmanager.secretAccessor`
+  - `roles/secretmanager.secretVersionManager`
 
 ### Notion API
-- **Base URL:** `https://api.notion.com/v1`
-- **Version:** 2022-06-28
-- **Endpoints usados:**
-  - `POST /databases/{id}/query` — Buscar pagina por URL de Frame.io
-  - `PATCH /pages/{id}` — Actualizar propiedades (conteos)
 
----
+- Base URL: `https://api.notion.com/v1`
+- Version: `2022-06-28`
+- Endpoints usados:
+  - `POST /databases/{id}/query`
+  - `GET /pages/{id}`
+  - `PATCH /pages/{id}`
 
-## Base de Datos Notion: "Tareas"
+## Base de Datos Notion: `Tareas`
 
 **Database ID:** `3a54f0904be14158833533ba96557a73`
 
 ### Propiedades relevantes
 
-| Propiedad | Tipo | Descripcion |
-|-----------|------|-------------|
-| Estado | Status | Trigger del sync (mapea a status de Frame.io) |
-| URL Frame.io | URL | URL del asset en Frame.io (pegada manualmente) |
-| Frame Versions | Number | Cantidad de versiones en el version stack (automatico) |
-| Frame Comments | Number | Cantidad de comentarios del asset (automatico) |
+| Propiedad | Tipo | Rol |
+|-----------|------|-----|
+| `Estado` | Status | Trigger desde Notion |
+| `URL Frame.io` | URL | URL manual del asset |
+| `Frame Asset ID` | Rich text | Clave primaria de asociacion |
+| `Frame Versions` | Number | Total de versiones |
+| `Frame Comments` | Number | Total de comentarios |
+| `Open Frame Comments` | Number | Comentarios abiertos |
+| `Resolved Frame Comments` | Number | Comentarios resueltos |
+| `Last Frame Comment` | Rich text | Texto del ultimo comentario |
+| `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
+| `Last Frame Comment At` | Date | Fecha del ultimo comentario |
+| `Last Frame Comment Timecode` | Rich text | Timecode del ultimo comentario |
+| `Last Reviewed Version` | Number | Version base de la ronda |
+| `Client Review Open` | Checkbox | Ronda de cliente abierta |
+| `Client Change Round` | Number | Contador persistente de rondas |
+| `RpA` | Formula | Calculado en Notion |
+| `Semaforo RpA` | Formula | Calculado en Notion |
 
----
+### Estrategia de asociacion
 
-## Mapeo de Status
+- Primero se busca por `Frame Asset ID`
+- Si no existe, fallback a `URL Frame.io`
+- Cuando la funcion identifica una pagina, persiste `Frame Asset ID`
 
-| Notion (Estado) | Frame.io | Variable de entorno |
-|-----------------|----------|---------------------|
-| En curso | In Progress | `FRAMEIO_STATUS_IN_PROGRESS` |
-| Listo para revision | Needs Review | `FRAMEIO_STATUS_NEEDS_REVIEW` |
-| Cambios Solicitados | Changes Requested | `FRAMEIO_STATUS_CHANGES_REQUESTED` |
-| Listo | Approved / Final | `FRAMEIO_STATUS_APPROVED` |
+## Mapeo de status
 
-Cada status de Frame.io se identifica por un UUID configurado en `.env.yaml`.
-El matching de status normaliza acentos, mayusculas/minusculas y espacios antes de resolver el UUID de Frame.io.
+| Notion | Frame.io | Variable |
+|--------|----------|----------|
+| `En curso` | `In Progress` | `FRAMEIO_STATUS_IN_PROGRESS` |
+| `Listo para revision` | `Needs Review` | `FRAMEIO_STATUS_NEEDS_REVIEW` |
+| `Cambios Solicitados` | `Changes requested` | `FRAMEIO_STATUS_CHANGES_REQUESTED` |
+| `Listo` | `Approved` | `FRAMEIO_STATUS_APPROVED` |
 
----
+### Estado real del mapping
 
-## Variables de Entorno
+- `En curso` esta validado en produccion
+- `Cambios Solicitados` no es confiable todavia
+- Ver `BUG-006`
+
+## Modelo actual de RpA
+
+- La Cloud Function **no** calcula `RpA`
+- La Cloud Function **no** calcula `Semaforo RpA`
+- Ambas propiedades deben seguir como formulas de Notion
+
+### Senales que hoy alimentan ese modelo
+
+- `Frame Versions`
+- `Frame Comments`
+- `Open Frame Comments`
+- `Resolved Frame Comments`
+- `Last Frame Comment`
+- `Last Frame Comment At`
+- `Last Frame Comment Timecode`
+- `Last Reviewed Version`
+- `Client Review Open`
+- `Client Change Round`
+
+### Logica actual de `Client Change Round`
+
+- abre ronda con `comment.created`
+- cierra ronda con `file.versioned`
+- no usa `Cambios Solicitados` como disparador principal mientras `BUG-006` siga abierto
+
+### Plan pendiente: comentarios automáticos en Notion
+
+- La API de Notion permite crear comentarios en paginas/bloques.
+- Idea propuesta:
+  - seguir usando propiedades como fuente estructurada para `RpA` y `Semaforo RpA`
+  - opcionalmente publicar tambien un comentario en la pagina de Notion cuando llegue feedback desde Frame.io
+- Objetivo:
+  - dejar una bitacora legible en la tarea sin mezclar esa bitacora con el calculo estructurado
+
+## Variables de entorno
 
 ### Notion
-| Variable | Descripcion |
-|----------|-------------|
-| `NOTION_TOKEN` | Token de integracion de Notion |
-| `NOTION_DATABASE_ID` | ID de la base de datos "Tareas" |
-| `NOTION_PROP_STATUS` | Nombre de la propiedad de status (default: "Estado") |
-| `NOTION_PROP_FRAME_URL` | Nombre de la propiedad de URL (default: "URL Frame.io") |
-| `NOTION_PROP_VERSIONS` | Nombre de la propiedad de versiones (default: "Frame Versions") |
-| `NOTION_PROP_COMMENTS` | Nombre de la propiedad de comentarios (default: "Frame Comments") |
+
+- `NOTION_TOKEN`
+- `NOTION_DATABASE_ID`
+- `NOTION_PROP_STATUS`
+- `NOTION_PROP_FRAME_URL`
+- `NOTION_PROP_ASSET_ID`
+- `NOTION_PROP_VERSIONS`
+- `NOTION_PROP_COMMENTS`
+- `NOTION_PROP_OPEN_COMMENTS`
+- `NOTION_PROP_RESOLVED_COMMENTS`
+- `NOTION_PROP_LAST_COMMENT`
+- `NOTION_PROP_LAST_COMMENT_ID`
+- `NOTION_PROP_LAST_COMMENT_AT`
+- `NOTION_PROP_LAST_COMMENT_TIMECODE`
+- `NOTION_PROP_LAST_REVIEWED_VERSION`
+- `NOTION_PROP_CLIENT_REVIEW_OPEN`
+- `NOTION_PROP_CHANGE_ROUND`
 
 ### Frame.io
-| Variable | Descripcion |
-|----------|-------------|
-| `FRAMEIO_ACCESS_TOKEN` | OAuth access token (se auto-renueva) |
-| `FRAMEIO_REFRESH_TOKEN` | OAuth refresh token (se actualiza junto al access token) |
-| `FRAMEIO_CLIENT_ID` | Client ID de la app Adobe/Frame.io |
-| `FRAMEIO_CLIENT_SECRET` | Client Secret de la app Adobe/Frame.io |
-| `FRAMEIO_ACCOUNT_ID` | Account ID de Frame.io |
-| `FRAMEIO_PROJECT_ID` | Project ID de Frame.io |
-| `FRAMEIO_STATUS_FIELD_ID` | UUID del campo de metadata "Status" |
-| `FRAMEIO_STATUS_IN_PROGRESS` | UUID del valor "In Progress" |
-| `FRAMEIO_STATUS_NEEDS_REVIEW` | UUID del valor "Needs Review" |
-| `FRAMEIO_STATUS_CHANGES_REQUESTED` | UUID del valor "Changes Requested" |
-| `FRAMEIO_STATUS_APPROVED` | UUID del valor "Approved" |
 
----
+- `FRAMEIO_ACCESS_TOKEN`
+- `FRAMEIO_REFRESH_TOKEN`
+- `FRAMEIO_CLIENT_ID`
+- `FRAMEIO_CLIENT_SECRET`
+- `FRAMEIO_ACCOUNT_ID`
+- `FRAMEIO_PROJECT_ID`
+- `FRAMEIO_STATUS_FIELD_ID`
+- `FRAMEIO_STATUS_IN_PROGRESS`
+- `FRAMEIO_STATUS_NEEDS_REVIEW`
+- `FRAMEIO_STATUS_CHANGES_REQUESTED`
+- `FRAMEIO_STATUS_APPROVED`
+- `SM_ACCESS_SECRET`
+- `SM_REFRESH_SECRET`
 
 ## Endpoints
 
 | Metodo | Path | Descripcion |
 |--------|------|-------------|
-| GET | `/` | Health check: version, estado del mapping, DB ID |
-| POST | `/notion-webhook` | Recibe webhook de Notion, sincroniza status y conteos |
-| POST | `/frameio-webhook` | Recibe webhook de Frame.io, actualiza conteos en Notion |
+| `GET` | `/` | Health check |
+| `POST` | `/notion-webhook` | Notion -> Frame.io + refresh de senales |
+| `POST` | `/frameio-webhook` | Frame.io -> Notion |
 
----
+## Webhook de Frame.io
 
-## Funcionalidades Clave del Codigo (main.py)
+- Workspace: `c90b7046-2ad9-4097-bcb4-3a81ee239398`
+- URL: `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync/frameio-webhook`
+- Eventos activos confirmados:
+  - `file.created`
+  - `file.versioned`
+  - `comment.created`
+  - `comment.deleted`
 
-### URL Parser (parse_asset_id)
-Extrae el asset ID de Frame.io de cualquier formato de URL:
-- URLs estandar: `frame.io/player/{uuid}`, `frame.io/reviews/.../{uuid}`, `frame.io/projects/.../files/{uuid}`
-- URLs acortadas: `f.io/xxx`, `fio.co/xxx` — resuelve via HTTP HEAD redirect
-- URLs de vista: `next.frame.io/.../view/...` — busca asset en el arbol del proyecto
-- Fallback: busqueda recursiva en children del proyecto comparando `view_url`
-- Si la URL es `next.frame.io/project/.../view/{uuid}`, el asset ID se extrae directamente via regex
-- Si la URL de vista no trae el asset ID de forma directa, se usa busqueda por proyecto como fallback
-- UUID directo: acepta un UUID sin URL
+### Follow-up abierto
 
-### Parser de Webhook de Notion
-- `parse_notion_payload()` intenta leer propiedades tanto desde `data` como desde `data.properties`
-- Si el webhook no incluye URL o status, `notion_get_page()` consulta la pagina completa en Notion usando `page_id`
-- Esto hace el flujo mas tolerante a payloads minimos enviados por Notion Automations
+- ampliar a `comment.completed`
+- ampliar a `comment.uncompleted`
 
-### Token Auto-Refresh
-- Todas las llamadas a Frame.io pasan por `_fio_request()`
-- Si la API responde 401, se intenta refresh via Adobe IMS
-- Los nuevos tokens se persisten en las env vars de la Cloud Function via GCP API
-- Si la persistencia falla, los tokens se mantienen en memoria hasta el proximo cold start
+## Funcionalidades clave del codigo
 
-### Conteo Inteligente de Versiones
-- Detecta si el asset es un version stack o esta dentro de uno
-- Cuenta children del version stack para obtener total de versiones
-- Suma `comment_count` de todas las versiones para un total correcto
+### URL y asset resolution
 
----
+- `parse_asset_id()` soporta UUID directo, URLs tradicionales, `f.io`, `fio.co` y `next.frame.io`
+- fallback de busqueda por proyecto para URLs no triviales
+
+### Notion payload parsing
+
+- `parse_notion_payload()` lee desde `data` y `data.properties`
+- usa `Frame Asset ID` antes que la URL
+- si faltan propiedades, usa `notion_get_page(page_id)`
+
+### Token refresh
+
+- `_fio_request()` reintenta con refresh si recibe `401`
+- los tokens nuevos se guardan en Secret Manager
+
+### Conteo y senales
+
+- `fio_get_counts()` usa metadata V4 para `Comment Count`
+- V2 se usa para la logica de versiones/version stacks
+- `fio_get_comment_signals()` extrae ultimo comentario y abiertos/resueltos
+- `notion_calculate_review_state()` mantiene `Client Change Round`
 
 ## Deploy
 
-### Comando rapido
-```bash
-./deploy.sh
-```
-
-### Comando manual (Windows con gcloud)
 ```bash
 gcloud functions deploy notion-frameio-sync \
   --gen2 --region=us-central1 --runtime=python312 \
@@ -228,40 +289,16 @@ gcloud functions deploy notion-frameio-sync \
   --project=efeonce-group
 ```
 
-### Verificar deploy
-```bash
-curl https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync
-```
-
-Respuesta esperada:
-```json
-{
-  "service": "notion-frameio-sync",
-  "version": "2.3.0",
-  "status": "ok",
-  "endpoints": ["/notion-webhook", "/frameio-webhook"],
-  "mapping": {
-    "En curso": "ok",
-    "Listo para revision": "ok",
-    "Cambios Solicitados": "ok",
-    "Listo": "ok"
-  }
-}
-```
-
----
-
-## Historial de Cambios
-
-Ver [CHANGELOG.md](CHANGELOG.md) para el detalle completo de cambios por version.
-
----
-
 ## Consideraciones
 
-- **Token expiration:** Los access tokens de Frame.io V4 expiran cada ~1 hora. El auto-refresh maneja esto transparentemente.
-- **Refresh token expiration:** Los refresh tokens de Adobe IMS expiran en ~14 dias. Si expira, hay que regenerar manualmente con `generate_frameio_token.py`.
-- **Rate limits:** Frame.io tiene rate limiting progresivo. Con el volumen tipico de Globe Studio no deberia ser problema.
-- **Cold starts:** En cold start la Cloud Function lee los tokens de las env vars. Si el auto-refresh persiste correctamente, los tokens sobreviven cold starts.
-- **Notion automation 200:** La funcion siempre responde 200 cuando no hay URL de Frame.io, para evitar que Notion pause la automatizacion por errores.
-- **Busqueda de assets:** La busqueda por proyecto (fallback) recorre hasta 2 niveles de profundidad con page_size=50 por nivel. Proyectos muy grandes podrian necesitar mas profundidad o paginacion.
+- access tokens expiran rapido; el sistema usa refresh automatico
+- open/resolved comments hoy se mantienen bien con `comment.created`, `comment.deleted` y `file.versioned`
+- `Last Frame Comment By` aun no existe porque el payload real disponible no trae actor enriquecido en la ruta que estamos usando
+- el endpoint de webhook de Frame.io sigue sin verificacion de firma
+
+## Documentacion complementaria
+
+- Ver `CHANGELOG.md`
+- Ver `BUGS.md`
+- Ver `TASKS.md`
+- Ver `HANDOFF.md`

@@ -14,7 +14,7 @@ FLUJO 3 — Pull on status change:
 Efeonce Group — Globe Studio Pipeline
 
 Base de datos Notion: "Tareas" (5126d7d8-bf3f-454c-80f4-be31d1ca38d4)
-Propiedades: Estado, URL Frame.io, Frame Versions, Frame Comments
+Propiedades: Estado, URL Frame.io, Frame Asset ID, Frame Versions, Frame Comments
 """
 
 import os
@@ -22,6 +22,7 @@ import re
 import json
 import logging
 import unicodedata
+from datetime import datetime
 import functions_framework
 from flask import jsonify
 import requests
@@ -54,8 +55,18 @@ NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "3a54f0904be1415883353
 # Notion property names (match your "Tareas" DB)
 PROP_STATUS = os.environ.get("NOTION_PROP_STATUS", "Estado")
 PROP_FRAME_URL = os.environ.get("NOTION_PROP_FRAME_URL", "URL Frame.io")
+PROP_ASSET_ID = os.environ.get("NOTION_PROP_ASSET_ID", "Frame Asset ID")
 PROP_VERSIONS = os.environ.get("NOTION_PROP_VERSIONS", "Frame Versions")
 PROP_COMMENTS = os.environ.get("NOTION_PROP_COMMENTS", "Frame Comments")
+PROP_OPEN_COMMENTS = os.environ.get("NOTION_PROP_OPEN_COMMENTS", "Open Frame Comments")
+PROP_RESOLVED_COMMENTS = os.environ.get("NOTION_PROP_RESOLVED_COMMENTS", "Resolved Frame Comments")
+PROP_LAST_COMMENT = os.environ.get("NOTION_PROP_LAST_COMMENT", "Last Frame Comment")
+PROP_LAST_COMMENT_ID = os.environ.get("NOTION_PROP_LAST_COMMENT_ID", "Last Frame Comment ID")
+PROP_LAST_COMMENT_AT = os.environ.get("NOTION_PROP_LAST_COMMENT_AT", "Last Frame Comment At")
+PROP_LAST_COMMENT_TIMECODE = os.environ.get("NOTION_PROP_LAST_COMMENT_TIMECODE", "Last Frame Comment Timecode")
+PROP_LAST_REVIEWED_VERSION = os.environ.get("NOTION_PROP_LAST_REVIEWED_VERSION", "Last Reviewed Version")
+PROP_CLIENT_REVIEW_OPEN = os.environ.get("NOTION_PROP_CLIENT_REVIEW_OPEN", "Client Review Open")
+PROP_CHANGE_ROUND = os.environ.get("NOTION_PROP_CHANGE_ROUND", "Client Change Round")
 
 # Status mapping: Notion status name -> Frame.io status UUID
 STATUS_MAP = {
@@ -312,47 +323,59 @@ _FIO = "https://api.frame.io"
 
 
 def fio_update_status(asset_id: str, status_uuid: str):
-    # List of endpoint/body combinations to try
-    attempts = [
-        # 1) Account-level metadata values
-        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
-         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
-        # 2) Project-level metadata values
-        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/projects/{FRAMEIO_PROJECT_ID}/metadata/values",
-         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
-        # 3) Account-level without data wrapper
-        ("PATCH", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
-         {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}),
-        # 4) POST instead of PATCH
-        ("POST", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/metadata/values",
-         {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}),
-    ]
+    url = f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/projects/{FRAMEIO_PROJECT_ID}/metadata/values"
+    body = {
+        "data": {
+            "file_ids": [asset_id],
+            "values": [{
+                "field_definition_id": FRAMEIO_STATUS_FIELD_ID,
+                "value": [status_uuid],
+            }],
+        }
+    }
 
-    r = None
-    for i, (method, url, body) in enumerate(attempts, 1):
-        r = _fio_request(method, url, json=body, timeout=10)
-        short_url = url.split("/v4/")[-1]
-        logger.warning(f"FIO attempt {i} ({method} {short_url}): {r.status_code} resp={r.text[:200]}")
-        if r.status_code < 400:
-            logger.warning(f"FIO status update SUCCESS on attempt {i}")
-            return r.json()
-        if r.status_code not in (404, 405, 422):
-            break
+    r = _fio_request("PATCH", url, json=body, timeout=10)
+    logger.warning(f"FIO bulk_update metadata: {r.status_code} resp={r.text[:500]}")
+
+    if r.status_code == 204 or not r.text.strip():
+        logger.info("FIO status update request accepted")
+        return {}
 
     r.raise_for_status()
-    return r.json()
+    return r.json() if r.text else {}
 
 
 def fio_get_counts(asset_id: str) -> dict:
     """Get version count + comment count for an asset."""
     out = {"versions": 1, "comments": 0}
 
+    # --- Prefer V4 metadata for comment count ---
+    try:
+        r = _fio_request("GET", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/files/{asset_id}/metadata", timeout=15)
+        if r.status_code == 200:
+            payload = r.json().get("data", [])
+            if isinstance(payload, list):
+                file_data = payload[0] if payload else {}
+            elif isinstance(payload, dict):
+                file_data = payload
+            else:
+                file_data = {}
+            metadata = file_data.get("metadata", []) if isinstance(file_data, dict) else []
+            for field in metadata:
+                if field.get("field_definition_name") == "Comment Count":
+                    value = field.get("value", 0)
+                    if isinstance(value, (int, float)):
+                        out["comments"] = int(value)
+                    break
+    except Exception as e:
+        logger.warning(f"V4 metadata fetch error: {e}")
+
     # --- Try V2 first (more reliable for version stacks) ---
     try:
         r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}", timeout=15)
         if r.status_code == 200:
             d = r.json()
-            out["comments"] = d.get("comment_count", 0)
+            out["comments"] = max(out["comments"], d.get("comment_count", 0))
 
             # If the asset itself is a version_stack
             if d.get("type") == "version_stack":
@@ -371,13 +394,104 @@ def fio_get_counts(asset_id: str) -> dict:
                         out["versions"] = len(children) if isinstance(children, list) else 1
                         # Sum comments across all versions
                         total_comments = sum(c.get("comment_count", 0) for c in children if isinstance(c, dict))
-                        if total_comments > out["comments"]:
-                            out["comments"] = total_comments
+                        out["comments"] = max(out["comments"], total_comments)
 
     except Exception as e:
         logger.warning(f"V2 asset fetch error: {e}")
 
     logger.info(f"Asset {asset_id}: versions={out['versions']}, comments={out['comments']}")
+    return out
+
+
+def fio_get_comment_file_id(comment_id: str) -> str | None:
+    """Resolve the parent file ID for a comment webhook resource."""
+    try:
+        r = _fio_request("GET", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/comments/{comment_id}", timeout=15)
+        r.raise_for_status()
+        data = r.json().get("data", {})
+
+        # Stable docs expose GET /comments/{comment_id}; be tolerant to response shape.
+        file_id = data.get("file_id")
+        if file_id:
+            return file_id
+
+        file_obj = data.get("file", {})
+        if isinstance(file_obj, dict):
+            return file_obj.get("id")
+    except Exception as e:
+        logger.warning(f"Could not resolve file_id for comment {comment_id}: {e}")
+
+    return None
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _format_timecode(value) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        total_seconds = int(float(value))
+    except (TypeError, ValueError):
+        return str(value)
+
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def fio_get_comment_signals(asset_id: str) -> dict:
+    """Get richer comment signals for review tracking."""
+    out = {
+        "open_comments": 0,
+        "resolved_comments": 0,
+        "last_comment_id": "",
+        "last_comment_text": "",
+        "last_comment_at": "",
+        "last_comment_timecode": "",
+    }
+
+    try:
+        r = _fio_request("GET", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/files/{asset_id}/comments", timeout=15)
+        if r.status_code != 200:
+            logger.warning(f"Comment signal fetch failed for {asset_id}: {r.status_code} {r.text[:300]}")
+            return out
+
+        payload = r.json().get("data", [])
+        if isinstance(payload, dict):
+            comments = [payload]
+        elif isinstance(payload, list):
+            comments = [item for item in payload if isinstance(item, dict)]
+        else:
+            comments = []
+
+        latest = None
+        latest_dt = None
+        for comment in comments:
+            if comment.get("completed_at"):
+                out["resolved_comments"] += 1
+            else:
+                out["open_comments"] += 1
+
+            sort_dt = _parse_iso_datetime(comment.get("updated_at")) or _parse_iso_datetime(comment.get("created_at"))
+            if latest is None or (sort_dt and (latest_dt is None or sort_dt > latest_dt)):
+                latest = comment
+                latest_dt = sort_dt
+
+        if latest:
+            out["last_comment_id"] = latest.get("id", "")
+            out["last_comment_text"] = (latest.get("text") or "").strip()
+            out["last_comment_at"] = latest.get("updated_at") or latest.get("created_at") or ""
+            out["last_comment_timecode"] = _format_timecode(latest.get("timestamp"))
+    except Exception as e:
+        logger.warning(f"Comment signal fetch error for {asset_id}: {e}")
+
     return out
 
 # =============================================
@@ -391,15 +505,25 @@ def _not_h():
     return {"Authorization": f"Bearer {NOTION_TOKEN}", "Content-Type": "application/json", "Notion-Version": "2022-06-28"}
 
 
-def notion_find_page(asset_id: str) -> str | None:
-    """Find Notion page whose 'URL Frame.io' contains this asset_id."""
-    body = {"filter": {"property": PROP_FRAME_URL, "url": {"contains": asset_id}}, "page_size": 1}
+def _notion_first_page(filter_body: dict) -> str | None:
+    body = {"filter": filter_body, "page_size": 1}
     r = requests.post(f"{_NOTION}/databases/{NOTION_DATABASE_ID}/query", headers=_not_h(), json=body, timeout=15)
     if r.status_code == 200:
         results = r.json().get("results", [])
         if results:
             return results[0]["id"]
+        return None
+
+    logger.warning(f"Notion query failed ({r.status_code}): {r.text[:300]}")
     return None
+
+
+def notion_find_page(asset_id: str) -> str | None:
+    """Find the Notion page for an asset, preferring an explicit asset ID property."""
+    page_id = _notion_first_page({"property": PROP_ASSET_ID, "rich_text": {"contains": asset_id}})
+    if page_id:
+        return page_id
+    return _notion_first_page({"property": PROP_FRAME_URL, "url": {"contains": asset_id}})
 
 
 def notion_get_page(page_id: str) -> dict | None:
@@ -411,13 +535,119 @@ def notion_get_page(page_id: str) -> dict | None:
     return None
 
 
-def notion_update_counts(page_id: str, versions: int, comments: int):
-    """Set Frame Versions and Frame Comments on a Notion page."""
+def _notion_prop_number(props: dict, name: str, default: int = 0) -> int:
+    prop = props.get(name, {})
+    value = prop.get("number") if isinstance(prop, dict) else None
+    return int(value) if isinstance(value, (int, float)) else default
+
+
+def _notion_prop_checkbox(props: dict, name: str, default: bool = False) -> bool:
+    prop = props.get(name, {})
+    value = prop.get("checkbox") if isinstance(prop, dict) else None
+    return bool(value) if isinstance(value, bool) else default
+
+
+def _notion_prop_plain_text(props: dict, name: str, default: str = "") -> str:
+    prop = props.get(name, {})
+    if not isinstance(prop, dict):
+        return default
+    rich_text = prop.get("rich_text", [])
+    if isinstance(rich_text, list) and rich_text:
+        return "".join(item.get("plain_text", "") for item in rich_text).strip()
+    title = prop.get("title", [])
+    if isinstance(title, list) and title:
+        return "".join(item.get("plain_text", "") for item in title).strip()
+    return default
+
+
+def notion_calculate_review_state(page: dict | None, versions: int, comment_signals: dict, event: str, resource_id: str = "") -> dict:
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    state = {
+        "client_change_round": _notion_prop_number(props, PROP_CHANGE_ROUND, 0),
+        "client_review_open": _notion_prop_checkbox(props, PROP_CLIENT_REVIEW_OPEN, False),
+        "last_reviewed_version": _notion_prop_number(props, PROP_LAST_REVIEWED_VERSION, 0),
+        "last_comment_id": _notion_prop_plain_text(props, PROP_LAST_COMMENT_ID, ""),
+    }
+
+    if versions > state["last_reviewed_version"]:
+        state["last_reviewed_version"] = versions
+
+    if event == "file.versioned":
+        state["client_review_open"] = False
+
+    if event == "comment.created":
+        incoming_comment_id = resource_id or comment_signals.get("last_comment_id", "")
+        is_new_comment = bool(incoming_comment_id and incoming_comment_id != state["last_comment_id"])
+        if is_new_comment and not state["client_review_open"]:
+            state["client_change_round"] += 1
+            state["client_review_open"] = True
+            state["last_reviewed_version"] = max(state["last_reviewed_version"], versions)
+
+    if event in ("comment.deleted", "comment.completed"):
+        if comment_signals.get("open_comments", 0) == 0:
+            state["client_review_open"] = False
+
+    if comment_signals.get("last_comment_id"):
+        state["last_comment_id"] = comment_signals["last_comment_id"]
+
+    return state
+
+
+def _notion_rich_text_prop(value: str) -> dict:
+    if not value:
+        return {"rich_text": []}
+    return {"rich_text": [{"type": "text", "text": {"content": value[:2000]}}]}
+
+
+def notion_update_counts(
+    page_id: str,
+    versions: int,
+    comments: int,
+    asset_id: str | None = None,
+    comment_signals: dict | None = None,
+    review_state: dict | None = None,
+):
+    """Set sync inputs and review signals on a Notion page."""
     props = {
         PROP_VERSIONS: {"number": versions},
         PROP_COMMENTS: {"number": comments},
     }
+    if asset_id:
+        props[PROP_ASSET_ID] = _notion_rich_text_prop(asset_id)
+
+    if comment_signals:
+        total_comments = max(comments, comment_signals.get("open_comments", 0) + comment_signals.get("resolved_comments", 0))
+        props[PROP_COMMENTS] = {"number": total_comments}
+        props[PROP_OPEN_COMMENTS] = {"number": comment_signals.get("open_comments", 0)}
+        props[PROP_RESOLVED_COMMENTS] = {"number": comment_signals.get("resolved_comments", 0)}
+        props[PROP_LAST_COMMENT] = _notion_rich_text_prop(comment_signals.get("last_comment_text", ""))
+        props[PROP_LAST_COMMENT_ID] = _notion_rich_text_prop(comment_signals.get("last_comment_id", ""))
+        props[PROP_LAST_COMMENT_TIMECODE] = _notion_rich_text_prop(comment_signals.get("last_comment_timecode", ""))
+        last_comment_at = comment_signals.get("last_comment_at", "")
+        props[PROP_LAST_COMMENT_AT] = {"date": {"start": last_comment_at}} if last_comment_at else {"date": None}
+
+    if review_state:
+        props[PROP_LAST_REVIEWED_VERSION] = {"number": review_state.get("last_reviewed_version", versions)}
+        props[PROP_CLIENT_REVIEW_OPEN] = {"checkbox": review_state.get("client_review_open", False)}
+        props[PROP_CHANGE_ROUND] = {"number": review_state.get("client_change_round", 0)}
+
     r = requests.patch(f"{_NOTION}/pages/{page_id}", headers=_not_h(), json={"properties": props}, timeout=15)
+    if asset_id and r.status_code == 400:
+        logger.warning(f"Notion asset ID property update failed, retrying counts-only patch: {r.text[:300]}")
+        for optional_prop in [
+            PROP_ASSET_ID,
+            PROP_OPEN_COMMENTS,
+            PROP_RESOLVED_COMMENTS,
+            PROP_LAST_COMMENT,
+            PROP_LAST_COMMENT_ID,
+            PROP_LAST_COMMENT_AT,
+            PROP_LAST_COMMENT_TIMECODE,
+            PROP_LAST_REVIEWED_VERSION,
+            PROP_CLIENT_REVIEW_OPEN,
+            PROP_CHANGE_ROUND,
+        ]:
+            props.pop(optional_prop, None)
+        r = requests.patch(f"{_NOTION}/pages/{page_id}", headers=_not_h(), json={"properties": props}, timeout=15)
     r.raise_for_status()
     return r.json()
 
@@ -450,6 +680,30 @@ def parse_notion_payload(payload: dict) -> tuple[str | None, str | None, str | N
         page = source.get("page")
         if not page_id and isinstance(page, dict):
             page_id = page.get("id")
+
+    # -- Explicit Asset ID --
+    for source in data_sources:
+        for key in [PROP_ASSET_ID, "Frame Asset ID", "Asset ID"]:
+            prop = source.get(key)
+            if not prop:
+                continue
+            raw = None
+            if isinstance(prop, str):
+                raw = prop
+            elif isinstance(prop, dict):
+                t = prop.get("type", "")
+                if t == "rich_text":
+                    tx = prop.get("rich_text", [])
+                    raw = "".join(item.get("plain_text", "") for item in tx) if tx else None
+                elif t == "title":
+                    tx = prop.get("title", [])
+                    raw = "".join(item.get("plain_text", "") for item in tx) if tx else None
+            if raw:
+                asset_id = parse_asset_id(raw)
+                if asset_id:
+                    break
+        if asset_id:
+            break
 
     # -- Frame URL --
     for source in data_sources:
@@ -525,7 +779,11 @@ def handle_notion(request):
             status = status or recovered_status
 
     if not asset_id:
-        return jsonify({"skipped": True, "reason": "No Frame.io URL in this task", "hint": f"Fill '{PROP_FRAME_URL}' in the Notion page"}), 200
+        return jsonify({
+            "skipped": True,
+            "reason": "No Frame.io asset reference in this task",
+            "hint": f"Fill '{PROP_ASSET_ID}' or '{PROP_FRAME_URL}' in the Notion page",
+        }), 200
 
     result = {"asset_id": asset_id, "status": status}
 
@@ -545,7 +803,17 @@ def handle_notion(request):
     if page_id:
         try:
             counts = fio_get_counts(asset_id)
-            notion_update_counts(page_id, counts["versions"], counts["comments"])
+            page = notion_get_page(page_id)
+            comment_signals = fio_get_comment_signals(asset_id)
+            review_state = notion_calculate_review_state(page, counts["versions"], comment_signals, "notion.sync")
+            notion_update_counts(
+                page_id,
+                counts["versions"],
+                counts["comments"],
+                asset_id=asset_id,
+                comment_signals=comment_signals,
+                review_state=review_state,
+            )
             result["notion_counts"] = counts
         except Exception as e:
             result["notion_counts_error"] = str(e)
@@ -556,7 +824,17 @@ def handle_notion(request):
         if found:
             try:
                 counts = fio_get_counts(asset_id)
-                notion_update_counts(found, counts["versions"], counts["comments"])
+                page = notion_get_page(found)
+                comment_signals = fio_get_comment_signals(asset_id)
+                review_state = notion_calculate_review_state(page, counts["versions"], comment_signals, "notion.sync")
+                notion_update_counts(
+                    found,
+                    counts["versions"],
+                    counts["comments"],
+                    asset_id=asset_id,
+                    comment_signals=comment_signals,
+                    review_state=review_state,
+                )
                 result["notion_counts"] = counts
                 result["notion_page_found"] = found
             except Exception as e:
@@ -577,7 +855,22 @@ def handle_frameio(request):
     logger.info(f"Frame.io webhook: {json.dumps(payload)[:800]}")
 
     event = payload.get("type", "unknown")
-    asset_id = payload.get("resource", {}).get("id", "")
+    project_id = payload.get("project", {}).get("id", "")
+    resource = payload.get("resource", {})
+    resource_id = resource.get("id", "")
+    resource_type = resource.get("type", "")
+
+    if project_id and FRAMEIO_PROJECT_ID and project_id != FRAMEIO_PROJECT_ID:
+        return jsonify({"skipped": True, "reason": "Event for another project", "event": event, "project_id": project_id}), 200
+
+    asset_id = ""
+    if resource_type == "file":
+        asset_id = resource_id
+    elif resource_type == "comment" or event.startswith("comment."):
+        asset_id = fio_get_comment_file_id(resource_id) or ""
+    else:
+        return jsonify({"skipped": True, "reason": f"Unsupported resource type '{resource_type}'", "event": event}), 200
+
     if not asset_id:
         return jsonify({"error": "No asset ID"}), 400
 
@@ -589,8 +882,28 @@ def handle_frameio(request):
     # Get counts and update
     try:
         counts = fio_get_counts(asset_id)
-        notion_update_counts(page_id, counts["versions"], counts["comments"])
-        return jsonify({"success": True, "event": event, "page_id": page_id, "counts": counts}), 200
+        page = notion_get_page(page_id)
+        comment_signals = fio_get_comment_signals(asset_id)
+        review_state = notion_calculate_review_state(page, counts["versions"], comment_signals, event, resource_id)
+        notion_update_counts(
+            page_id,
+            counts["versions"],
+            counts["comments"],
+            asset_id=asset_id,
+            comment_signals=comment_signals,
+            review_state=review_state,
+        )
+        return jsonify({
+            "success": True,
+            "event": event,
+            "page_id": page_id,
+            "counts": counts,
+            "review_state": {
+                "client_change_round": review_state["client_change_round"],
+                "client_review_open": review_state["client_review_open"],
+                "last_reviewed_version": review_state["last_reviewed_version"],
+            },
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
@@ -606,7 +919,7 @@ def sync_status(request):
     if request.method == "GET":
         return jsonify({
             "service": "notion-frameio-sync",
-            "version": "2.3.0",
+            "version": "2.3.1",
             "status": "ok",
             "endpoints": ["/notion-webhook", "/frameio-webhook"],
             "mapping": {k: ("ok" if v else "NOT SET") for k, v in STATUS_MAP.items()},

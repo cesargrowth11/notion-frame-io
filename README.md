@@ -1,183 +1,163 @@
-# Notion ↔ Frame.io V4 Bidirectional Sync — V2
+# Notion <-> Frame.io V4 Sync
 
-**Efeonce Group — Globe Studio Pipeline**
+Cloud Function para sincronizar estados y señales de revision entre la base `Tareas` de Notion y un proyecto de Frame.io.
 
-Cloud Function que sincroniza automáticamente el status y métricas de assets entre Notion y Frame.io V4.
+## Estado actual
 
-## Qué hace
+- `Notion -> Frame.io`: funcional para `En curso`
+- `Frame.io -> Notion`: funcional para versiones, comentarios y senales base de revision
+- `Client Change Round`: funcional en primer corte
+- `Cambios Solicitados -> Changes requested`: no confiable todavia, ver `BUG-006`
 
-### Flujo 1: Notion → Frame.io (status sync)
-Cuando alguien cambia el **Estado** de una tarea en Notion, Frame.io se actualiza automáticamente.
+## Que hace hoy
 
-### Flujo 2: Frame.io → Notion (push de métricas)
-Cuando alguien sube una nueva versión o deja un comentario en Frame.io, Notion se actualiza con el conteo.
+### 1. Notion -> Frame.io
 
-### Flujo 3: Pull en cambio de status
-Cuando Notion dispara el webhook de status, la función también trae de vuelta los conteos de Frame.io a Notion (ida y vuelta en la misma ejecución).
+Cuando cambia `Estado` en Notion, la funcion intenta actualizar el campo `Status` del asset en Frame.io.
+
+### 2. Frame.io -> Notion
+
+Cuando llega un webhook de Frame.io:
+
+- actualiza `Frame Versions`
+- actualiza `Frame Comments`
+- actualiza `Open Frame Comments`
+- actualiza `Resolved Frame Comments`
+- actualiza `Last Frame Comment`
+- actualiza `Last Frame Comment ID`
+- actualiza `Last Frame Comment At`
+- actualiza `Last Frame Comment Timecode`
+- actualiza `Last Reviewed Version`
+- actualiza `Client Review Open`
+- actualiza `Client Change Round`
+
+### 3. Pull on status change
+
+Cuando Notion llama `/notion-webhook`, la funcion tambien refresca las senales de Frame.io para esa tarea.
+
+## Modelo actual de RpA
+
+La Cloud Function no calcula `RpA` ni `Semaforo RpA`.
+
+La funcion solo escribe senales base en Notion. Las formulas de `RpA` y `Semaforo RpA` deben vivir en Notion.
+
+### Senales disponibles en Notion
+
+| Propiedad | Tipo | Uso |
+|-----------|------|-----|
+| `Frame Asset ID` | Rich text | Clave explicita de asociacion con el asset |
+| `Frame Versions` | Number | Total de versiones del asset/version stack |
+| `Frame Comments` | Number | Total de comentarios |
+| `Open Frame Comments` | Number | Comentarios abiertos |
+| `Resolved Frame Comments` | Number | Comentarios resueltos |
+| `Last Frame Comment` | Rich text | Ultimo comentario visible |
+| `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
+| `Last Frame Comment At` | Date | Fecha del ultimo comentario |
+| `Last Frame Comment Timecode` | Rich text | Timecode formateado del ultimo comentario |
+| `Last Reviewed Version` | Number | Version base de la ronda actual |
+| `Client Review Open` | Checkbox | Indica si la ronda sigue abierta |
+| `Client Change Round` | Number | Contador persistente de rondas |
+
+### Logica actual de `Client Change Round`
+
+- abre una ronda con `comment.created`
+- cierra la ronda con `file.versioned`
+- no usa `Cambios Solicitados` como senal principal mientras `BUG-006` siga abierto
 
 ## Arquitectura
 
-```
-                          ┌─────────────────────────┐
-  ┌────────────┐  POST    │                         │  PATCH    ┌────────────┐
-  │            │─────────►│   Cloud Function (GCP)  │──────────►│            │
-  │  Notion DB │          │   /notion-webhook       │           │ Frame.io   │
-  │  "Tareas"  │◄─────────│                         │◄──────────│ V4 API     │
-  │            │  UPDATE   │   /frameio-webhook      │  GET      │            │
-  └────────────┘  counts  └─────────────────────────┘  counts   └────────────┘
+```text
+Notion Automation -> /notion-webhook -> Frame.io status update + pull de senales
+Frame.io Webhook  -> /frameio-webhook -> Notion property updates
 ```
 
-## Mapping de Status
+## Requisitos
 
-| Notion (Estado)        | →  | Frame.io             |
-|------------------------|----|----------------------|
-| En curso               | →  | In Progress          |
-| Listo para revisión    | →  | Needs Review         |
-| Cambios Solicitados    | →  | Changes Requested    |
-| Listo                  | →  | Approved / Final     |
+- Google Cloud Functions Gen 2
+- Python 3.12
+- proyecto GCP `efeonce-group`
+- acceso a Notion API
+- acceso a Frame.io API
+- Secret Manager para tokens OAuth
 
-## Propiedades en Notion (Base "Tareas")
+## Variables importantes
 
-| Propiedad        | Tipo    | Descripción                                    |
-|------------------|---------|------------------------------------------------|
-| Estado           | Status  | Trigger del sync (ya existía)                  |
-| URL Frame.io     | URL     | Los chicos pegan la URL del asset aquí         |
-| Frame Versions   | Number  | Versiones en el Version Stack (automático)     |
-| Frame Comments   | Number  | Comentarios del asset (automático)             |
+### Notion
 
-> **RpA (Rounds per Asset):** Frame Versions alimenta directamente el cálculo de RpA.
-> Tu fórmula de Semáforo RpA puede leer de Frame Versions para tener datos
-> automáticos desde Frame.io, complementando la base de Revisiones manual.
+- `NOTION_TOKEN`
+- `NOTION_DATABASE_ID`
+- `NOTION_PROP_STATUS`
+- `NOTION_PROP_FRAME_URL`
+- `NOTION_PROP_ASSET_ID`
+- `NOTION_PROP_VERSIONS`
+- `NOTION_PROP_COMMENTS`
+- `NOTION_PROP_OPEN_COMMENTS`
+- `NOTION_PROP_RESOLVED_COMMENTS`
+- `NOTION_PROP_LAST_COMMENT`
+- `NOTION_PROP_LAST_COMMENT_ID`
+- `NOTION_PROP_LAST_COMMENT_AT`
+- `NOTION_PROP_LAST_COMMENT_TIMECODE`
+- `NOTION_PROP_LAST_REVIEWED_VERSION`
+- `NOTION_PROP_CLIENT_REVIEW_OPEN`
+- `NOTION_PROP_CHANGE_ROUND`
 
-## Setup Paso a Paso
+### Frame.io
 
-### 1. Obtener credenciales de Frame.io V4
+- `FRAMEIO_ACCESS_TOKEN`
+- `FRAMEIO_REFRESH_TOKEN`
+- `FRAMEIO_CLIENT_ID`
+- `FRAMEIO_CLIENT_SECRET`
+- `FRAMEIO_ACCOUNT_ID`
+- `FRAMEIO_PROJECT_ID`
+- `FRAMEIO_STATUS_FIELD_ID`
+- `FRAMEIO_STATUS_IN_PROGRESS`
+- `FRAMEIO_STATUS_NEEDS_REVIEW`
+- `FRAMEIO_STATUS_CHANGES_REQUESTED`
+- `FRAMEIO_STATUS_APPROVED`
+- `SM_ACCESS_SECRET`
+- `SM_REFRESH_SECRET`
 
-1. Ve a [Adobe Developer Console](https://console.adobe.io)
-2. Crea un proyecto o usa uno existente
-3. Agrega la API de Frame.io
-4. Genera un OAuth 2.0 access token
-5. Anota tu **Account ID** y **Project ID** (están en la URL de Frame.io)
-
-### 2. Obtener los UUIDs de status de Frame.io
+## Deploy
 
 ```bash
-export FRAMEIO_ACCESS_TOKEN="tu-token"
-export FRAMEIO_ACCOUNT_ID="tu-account-id"
-export FRAMEIO_PROJECT_ID="tu-project-id"
-
-python3 get_frameio_status_uuids.py
+gcloud functions deploy notion-frameio-sync \
+  --gen2 --region=us-central1 --runtime=python312 \
+  --source=. --entry-point=sync_status \
+  --trigger-http --allow-unauthenticated \
+  --env-vars-file=.env.yaml \
+  --memory=256MB --timeout=60s \
+  --min-instances=0 --max-instances=10 \
+  --project=efeonce-group
 ```
-
-### 3. Completar variables de entorno
-
-Edita `.env.yaml` — los valores de Notion ya están pre-configurados:
-
-```yaml
-# Ya configurado:
-NOTION_TOKEN: "ntn_..."
-NOTION_DATABASE_ID: "3a54f0904be14158833533ba96557a73"
-
-# Completar con tus valores de Frame.io:
-FRAMEIO_ACCESS_TOKEN: "tu-token"
-FRAMEIO_ACCOUNT_ID: "tu-account-id"
-FRAMEIO_PROJECT_ID: "tu-project-id"
-FRAMEIO_STATUS_FIELD_ID: "uuid-del-campo"
-FRAMEIO_STATUS_IN_PROGRESS: "uuid"
-FRAMEIO_STATUS_NEEDS_REVIEW: "uuid"
-FRAMEIO_STATUS_CHANGES_REQUESTED: "uuid"
-FRAMEIO_STATUS_APPROVED: "uuid"
-```
-
-### 4. Deploy a Google Cloud
-
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
-Al final te da la URL pública. Ejemplo: `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync`
-
-### 5. Configurar Notion Automation
-
-1. Abre la base **"Tareas"** en Notion
-2. Clic en ⚡️ (Automations)
-3. **Trigger:** "Estado" cambia a cualquier valor
-4. **Action:** "Send webhook"
-5. **URL:** `https://TU-URL/notion-webhook`
-6. **Propiedades a enviar:** "URL Frame.io" + "Estado"
-
-### 6. Configurar Frame.io Webhook (opcional, para push)
-
-En el [Frame.io Developer Portal](https://developer.frame.io):
-
-1. Crea un webhook para tu Team/Workspace
-2. **URL:** `https://TU-URL/frameio-webhook`
-3. **Events:** `file.created`, `comment.created`
-
-### 7. Los chicos pegan URLs
-
-Para cada tarea en Notion que tenga un asset en Frame.io, pegan la URL del navegador en **"URL Frame.io"**:
-
-```
-https://app.frame.io/player/a7e95254-8cd6-4d59-b54d-28c58570a8de
-```
-
-Cualquier formato de URL de Frame.io funciona (player, reviews, projects).
-
-## Testing
-
-### Health check:
-```bash
-curl https://TU-URL
-```
-
-### Simular webhook de Notion:
-```bash
-curl -X POST https://TU-URL/notion-webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "data": {
-      "URL Frame.io": {
-        "type": "url",
-        "url": "https://app.frame.io/player/TU-ASSET-ID"
-      },
-      "Estado": {
-        "type": "status",
-        "status": {"name": "Listo"}
-      }
-    }
-  }'
-```
-
-## RpA: Cómo conectar Frame Versions al semáforo
-
-Opción 1 — **Complementar el RpA actual:** Tu fórmula de RpA sigue leyendo del rollup de Revisiones, y Frame Versions sirve como dato de validación cruzada.
-
-Opción 2 — **Reemplazar con Frame Versions:** Cambia la fórmula de RpA para que lea de `prop("Frame Versions")` en vez del rollup. Así el dato viene 100% automático desde Frame.io.
 
 ## Endpoints
 
-| Método | Path              | Descripción                           |
-|--------|-------------------|---------------------------------------|
-| GET    | /                 | Health check + estado de mapping      |
-| POST   | /notion-webhook   | Notion → Frame.io + pull counts       |
-| POST   | /frameio-webhook  | Frame.io → Notion counts              |
+| Metodo | Path | Uso |
+|--------|------|-----|
+| `GET` | `/` | health check |
+| `POST` | `/notion-webhook` | status sync y pull de senales |
+| `POST` | `/frameio-webhook` | push de senales desde Frame.io |
 
-## Consideraciones
+## Webhook activo de Frame.io
 
-- **OAuth Token Refresh:** Los tokens de Frame.io V4 expiran. Para producción, implementar refresh automático o regenerar manualmente.
-- **Múltiples proyectos:** Si Globe Studio maneja varios proyectos en Frame.io, agregar lógica de ruteo por proyecto.
-- **Rate limits:** Frame.io tiene rate limiting progresivo. Con el volumen de Globe Studio no debería haber problemas.
-- **Logs:** Todos los eventos se logean en Cloud Logging de GCP (`notion-frameio-sync`).
+- Workspace: `c90b7046-2ad9-4097-bcb4-3a81ee239398`
+- URL: `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync/frameio-webhook`
+- Eventos activos confirmados:
+  - `file.created`
+  - `file.versioned`
+  - `comment.created`
+  - `comment.deleted`
 
-## Archivos
+## Limitaciones conocidas
 
-```
-├── main.py                      # Cloud Function principal (V2 bidireccional)
-├── requirements.txt             # Dependencias Python
-├── .env.yaml                    # Variables de entorno (Notion pre-configurado)
-├── deploy.sh                    # Script de deploy a GCP
-├── get_frameio_status_uuids.py  # Helper: obtener UUIDs de Frame.io
-└── README.md                    # Este archivo
-```
+- `BUG-006`: `Cambios Solicitados` no esta validado como sync confiable hacia `Changes requested`
+- el webhook actual no quedo ampliado de forma confirmada a `comment.completed` / `comment.uncompleted`
+- el payload real de comentarios no trae autor de forma rica, por eso no existe aun `Last Frame Comment By`
+
+## Documentacion operativa
+
+- Ver [CHANGELOG.md](CHANGELOG.md) para cambios por version
+- Ver [BUGS.md](BUGS.md) para causas raiz y resoluciones
+- Ver [TASKS.md](TASKS.md) para pendientes activos
+- Ver [HANDOFF.md](HANDOFF.md) para traspasos operativos
+- Ver [project_context.md](project_context.md) para contexto del proyecto

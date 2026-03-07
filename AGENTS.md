@@ -12,6 +12,7 @@ This project is a Google Cloud Function that syncs status and metrics between No
 - Deployment details: `deploy.sh`
 - Project overview: `project_context.md`
 - Change history: `CHANGELOG.md`
+- Bug and issue register: `BUGS.md`
 
 If documentation conflicts with code, treat `main.py` as the current behavior and update docs in the same task.
 
@@ -56,7 +57,7 @@ Example naming:
 2. Claim the task in `TASKS.md`.
 3. Make the smallest correct change.
 4. Run the narrowest useful verification.
-5. Update docs if behavior changed.
+5. Update docs and issue tracking before closing the task.
 6. Add a handoff note in `HANDOFF.md`.
 
 ## Verification Expectations
@@ -71,18 +72,32 @@ If deployment or live API checks are performed, record the outcome in `HANDOFF.m
 
 ## Documentation Expectations
 
-When behavior changes, update:
+At the start of every session:
+
+- Read `README.md`, `project_context.md`, `CHANGELOG.md`, and `BUGS.md` if it exists.
+- If any of them is stale relative to `main.py` or the deployed behavior, treat updating them as part of the active task, not optional cleanup.
+
+After every meaningful change, before ending the session or handing off:
 
 - `CHANGELOG.md` for the release entry
 - `project_context.md` if architecture, behavior, or version changes
 - `README.md` if setup, automation payloads, or deployment steps changed
+- `BUGS.md` when:
+  - a bug is discovered
+  - a cause is confirmed
+  - a workaround is adopted
+  - a bug is resolved
+
+Documentation and issue tracking are mandatory deliverables of each session. Do not leave behavior changes undocumented for a later pass unless the user explicitly asks you not to update docs.
 
 ## Current Project Notes
 
-- Current runtime version is `2.3.0`.
-- Notion status matching now normalizes accents, spacing, and case.
-- Notion webhook parsing now tolerates partial payloads and can recover missing properties from the Notion API using `page_id`.
-- Frame.io URL parsing includes shortened URLs and `next.frame.io` view URLs.
+- Current runtime version is `2.3.1`.
+- Tokens are persisted in Secret Manager, not Cloud Function env mutation.
+- Notion association now prefers `Frame Asset ID` and falls back to `URL Frame.io`.
+- Frame.io comment/version webhooks now feed review signals into Notion, including `Client Change Round`.
+- `RpA` and `Semaforo RpA` remain calculated in Notion, not in Python.
+- `BUG-006` is still open: `Cambios Solicitados` is not yet a reliable sync signal to Frame.io.
 
 ## Handoff Format
 
