@@ -295,6 +295,74 @@ notion-frame-io/
 3. La siguiente ronda solo puede nacer despues de `file.versioned` y nuevo feedback.
 4. Los registros heredados que quedaron sobrecontados se corrigen automaticamente cuando la tarea vuelva a ser procesada.
 
+### Implementacion en branch: rondas de revision para tareas sin Frame.io
+
+Problema de negocio:
+- no todos los entregables pasan por Frame.io
+- PDFs, brochures, landings u otras piezas pueden iterar por mail, Teams u otros canales
+- depender de que el equipo documente manualmente cada cambio en `Revisiones` introduce demasiado riesgo de datos incompletos
+
+Decision de arquitectura aplicada en la branch `feature/notion-workflow-change-rounds`:
+- la logica de rondas para tareas sin Frame.io tambien vive en la Cloud Function
+- Notion sigue siendo la fuente del `Estado`, pero no la capa principal de logica
+- la base `Revisiones` queda como bitacora complementaria o auto-generada, no como fuente critica
+
+Modelo implementado por origen:
+- tareas con `Frame Asset ID`:
+  - siguen usando `Client Change Round` alimentado por eventos de Frame.io
+- tareas sin `Frame Asset ID`:
+  - usan un contador separado basado en transiciones de `Estado`
+  - entran por una rama `workflow_only` dentro de `handle_notion()`
+  - respetan `Review Source = Workflow` o `Review Source = Auto`
+
+Propiedades agregadas en `Tareas`:
+- `Workflow Change Round`: contador de rondas para tareas sin Frame.io
+- `Workflow Review Open`: estado abierto/cerrado de la revision en el flujo Notion-only
+- `Last Workflow Status`: memoria minima para evitar dobles incrementos ante webhooks repetidos o ediciones redundantes
+- `Review Source`: `Frame.io`, `Workflow`, `Auto`
+
+Regla de negocio implementada para `Workflow Change Round`:
+- `En curso` o `Cambios Solicitados` -> `Listo para revision`:
+  - abre una nueva ronda
+  - incrementa `Workflow Change Round`
+  - pone `Workflow Review Open = true`
+- `Listo para revision` -> `Cambios Solicitados`:
+  - no incrementa
+  - pone `Workflow Review Open = false`
+- `Listo para revision` -> `Listo`:
+  - no incrementa
+  - pone `Workflow Review Open = false`
+- si los campos auxiliares estan vacios y la tarea entra por primera vez a `Listo para revision`:
+  - bootstrappea la ronda en `1`
+- si llega el mismo webhook repetido sin cambio real de estado:
+  - no incrementa mientras `Workflow Review Open` siga en `true`
+
+Validacion real completada en staging:
+- funcion temporal: `notion-frameio-sync-staging`
+- pagina de prueba: `31c39c2f-efe7-811a-9b6e-f40938fd0946`
+- secuencia validada:
+  - `En curso` -> `Listo para revision`
+  - `Listo para revision` -> `Cambios Solicitados`
+  - `Cambios Solicitados` -> `Listo para revision`
+- resultados observados:
+  - `Workflow Change Round = 1 -> 1 -> 2`
+  - `Workflow Review Open = true -> false -> true`
+  - repetir el webhook final mantuvo `Workflow Change Round = 2`
+
+Unificacion de reporting pendiente:
+- `Client Change Round Final`: capa unificada para reporting
+- `Client Change Round Final` elegira el origen correcto
+  - si `Review Source = Frame.io`, usa `Client Change Round`
+  - si `Review Source = Workflow`, usa `Workflow Change Round`
+  - si `Review Source = Auto`, usa `Frame Asset ID` para decidir
+- `RpA` y `Semaforo RpA` pueden mantenerse mientras se migran vistas y charts, pero deberian pasar a depender de `Client Change Round Final`
+
+Estado de rollout en esta branch:
+1. propiedades nuevas agregadas en Notion
+2. rama `Workflow` implementada y validada en staging
+3. pendiente mover reporting a `Client Change Round Final`
+4. pendiente decidir despues si `RpA` y `Semaforo RpA` siguen teniendo valor o quedan redundantes
+
 ### Plan recomendado para la eventual feature
 
 1. Fase 1, segura:

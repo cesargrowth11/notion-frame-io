@@ -10,10 +10,13 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - [BUG-007] `Client Change Round` en la branch `feature/client-change-round-version-logic` ahora cuenta una sola ronda por version entregada: comentarios adicionales, cierres o reaperturas sobre la misma version ya no incrementan el contador.
 - [BUG-007] `Last Reviewed Version` pasa a representar la ultima version que ya abrio una ronda contabilizada, en lugar de adelantarse automaticamente a la ultima version vista.
 - [BUG-007] El runtime ahora autocorrige paginas heredadas donde `Client Change Round` quedo mayor que `Last Reviewed Version` por la logica anterior.
+- La branch `feature/notion-workflow-change-rounds` agrega una rama `workflow_only` en `/notion-webhook` para tareas sin `Frame Asset ID`, usando `Estado` y `Review Source` para alimentar `Workflow Change Round`, `Workflow Review Open` y `Last Workflow Status`.
+- La logica de workflow-only bootstrappea la primera ronda en `1` cuando una tarea preexistente entra por primera vez a `Listo para revision` con campos auxiliares vacios, y evita dobles incrementos en webhooks repetidos mientras la revision sigue abierta.
 
 ### Documentacion
 - Se alinearon `README.md`, `project_context.md` y `BUGS.md` con la nueva semantica version-based de `Client Change Round` antes de validar el branch para merge.
 - Se agrego trazabilidad explicita de que la fix fue validada en staging y sigue pendiente de merge a `main`.
+- Se actualizo la documentacion del plan Notion-only a estado implementado en branch, incluyendo la validacion real en staging sobre la secuencia `En curso -> Listo para revision -> Cambios Solicitados -> Listo para revision`.
 
 ## [2.3.2] - 2026-03-07
 

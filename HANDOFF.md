@@ -358,6 +358,37 @@
   - This merge only updated the repository branch; no production deploy was performed in this step
   - After the merge, local `main` was ahead of `origin/main` and ready to be pushed
 
+## 2026-03-07 18:20 America/Santiago - Codex
+
+- Task: Document the planned Notion-only review-round architecture before implementation
+- Files changed: `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Re-read the live `Tareas` schema and confirmed it already has `Estado`, `Fecha de envío a revisión`, `Fecha de retorno`, `Client Change Round`, `RpA`, `Semáforo RpA`, and a related `Revisiones` data source
+  - Re-read the `Revisiones` data source and confirmed it is useful as an optional log, but too manual to be the source of truth for round counting
+- Notes:
+  - The documented plan keeps the round logic in the Cloud Function, not in Notion formulas or chained automations
+  - Planned new properties for the implementation phase are `Workflow Change Round`, `Workflow Review Open`, `Last Workflow Status`, `Review Source`, and `Client Change Round Final`
+  - `RpA` and `Semáforo RpA` are intentionally kept for now and would later point at the unified final round field
+
+## 2026-03-07 18:30 America/Santiago - Codex
+
+- Task: Implement and validate workflow-backed review rounds for tasks without Frame.io in a feature branch
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Added live Notion schema support in `Tareas` for `Workflow Change Round`, `Workflow Review Open`, `Last Workflow Status`, and `Review Source`
+  - Deployed this branch to temporary staging function `notion-frameio-sync-staging`
+  - Used test page `31c39c2f-efe7-811a-9b6e-f40938fd0946` with `Review Source = Workflow`
+  - Validated sequence:
+    - `En curso` -> `Listo para revision` => `Workflow Change Round = 1`, `Workflow Review Open = true`
+    - `Listo para revision` -> `Cambios Solicitados` => `Workflow Change Round = 1`, `Workflow Review Open = false`
+    - `Cambios Solicitados` -> `Listo para revision` => `Workflow Change Round = 2`, `Workflow Review Open = true`
+  - Repeated the last webhook without changing `Estado` and confirmed idempotence: `Workflow Change Round` stayed at `2`
+- Notes:
+  - Added bootstrap logic so preexisting tasks with empty workflow helpers enter their first review as round `1`
+  - The branch now handles workflow-only tasks in `/notion-webhook` without disturbing the existing Frame.io-backed path
+  - Reporting unification is still pending: `Client Change Round Final`, `RpA`, and `Semaforo RpA` were intentionally left untouched in this step
+
 ## Template
 
 Copy this block for the next handoff:

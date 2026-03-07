@@ -78,6 +78,40 @@ La funcion solo escribe senales base en Notion. Las formulas de `RpA` y `Semafor
 - si una pagina ya arrastra un `Client Change Round` mayor que `Last Reviewed Version` por la logica anterior, el runtime la autocorrige al proximo procesamiento
 - no usa `Cambios Solicitados` como senal principal mientras `BUG-006` siga abierto
 
+### Workflow-backed rounds para piezas que no pasan por Frame.io
+
+No todas las piezas van a revisarse en Frame.io. Para PDFs, brochures, landing pages u otros entregables revisados por otros canales, esta branch implementa una logica paralela en la Cloud Function para contar rondas desde transiciones de `Estado`, sin depender de automations complejas de Notion.
+
+Estado de la implementacion en la branch `feature/notion-workflow-change-rounds`:
+- tareas con `Frame Asset ID` siguen usando la logica actual de Frame.io
+- tareas sin `Frame Asset ID` y con `Review Source = Workflow` o `Auto` entran por una rama `workflow_only` en `/notion-webhook`
+- el backend escribe `Workflow Change Round`, `Workflow Review Open` y `Last Workflow Status`
+- `Review Source` permite forzar `Frame.io`, forzar `Workflow` o dejar `Auto`
+
+Propiedades de soporte:
+- `Workflow Change Round`
+- `Workflow Review Open`
+- `Last Workflow Status`
+- `Review Source`
+
+Regla de negocio aplicada para tareas sin Frame.io:
+- `En curso` o `Cambios Solicitados` -> `Listo para revision` abre una nueva ronda
+- `Listo para revision` -> `Cambios Solicitados` no incrementa la ronda, solo la devuelve a trabajo
+- `Listo para revision` -> `Listo` cierra la revision sin incrementar
+- una tarea preexistente con campos auxiliares vacios se auto-inicializa en ronda `1` cuando entra por primera vez a `Listo para revision`
+- repetir el mismo webhook mientras la tarea sigue en revision no vuelve a incrementar la ronda
+
+Validacion real en staging:
+- pagina de prueba `31c39c2f-efe7-811a-9b6e-f40938fd0946`
+- secuencia validada: `En curso` -> `Listo para revision` -> `Cambios Solicitados` -> `Listo para revision`
+- resultado observado: `Workflow Change Round = 1 -> 1 -> 2`
+- `Workflow Review Open = true -> false -> true`
+
+Pendiente antes de liberarlo:
+- agregar `Client Change Round Final`
+- mover `RpA` y `Semaforo RpA` a la propiedad final unificada
+- decidir si `Revisiones` se usa como bitacora auto-generada o solo como apoyo opcional
+
 ## Arquitectura
 
 ```text
