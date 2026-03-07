@@ -389,6 +389,19 @@
   - The branch now handles workflow-only tasks in `/notion-webhook` without disturbing the existing Frame.io-backed path
   - Reporting unification is still pending: `Client Change Round Final`, `RpA`, and `Semaforo RpA` were intentionally left untouched in this step
 
+## 2026-03-07 18:45 America/Santiago - Codex
+
+- Task: Merge workflow-backed review rounds into `main` after validating the merge does not break the current codebase
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Checked out `main`
+  - Ran `git merge --no-ff --no-commit feature/notion-workflow-change-rounds`
+  - `python -m py_compile main.py`
+  - Reviewed the staged merge diff to confirm only the expected workflow-only runtime and documentation changes were present
+- Notes:
+  - The merge was validated locally before being committed, so no rollback was needed
+  - This step updates repository `main` only; production deployment remains a separate decision
+
 ## Template
 
 Copy this block for the next handoff:
