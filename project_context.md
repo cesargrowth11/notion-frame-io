@@ -295,6 +295,56 @@ notion-frame-io/
 3. La siguiente ronda solo puede nacer despues de `file.versioned` y nuevo feedback.
 4. Los registros heredados que quedaron sobrecontados se corrigen automaticamente cuando la tarea vuelva a ser procesada.
 
+### Plan documentado: rondas de revision para tareas sin Frame.io
+
+Problema de negocio:
+- no todos los entregables pasan por Frame.io
+- PDFs, brochures, landings u otras piezas pueden iterar por mail, Teams u otros canales
+- depender de que el equipo documente manualmente cada cambio en `Revisiones` introduce demasiado riesgo de datos incompletos
+
+Decision de arquitectura:
+- la logica de rondas para tareas sin Frame.io tambien debe vivir en la Cloud Function
+- Notion sigue siendo la fuente del `Estado`, pero no la capa principal de logica
+- la base `Revisiones` queda como bitacora complementaria o auto-generada, no como fuente critica
+
+Modelo propuesto por origen:
+- tareas con `Frame Asset ID`:
+  - siguen usando `Client Change Round` alimentado por eventos de Frame.io
+- tareas sin `Frame Asset ID`:
+  - usan un contador separado basado en transiciones de `Estado`
+
+Propiedades previstas en `Tareas`:
+- `Workflow Change Round`: contador de rondas para tareas sin Frame.io
+- `Workflow Review Open`: estado abierto/cerrado de la revision en el flujo Notion-only
+- `Last Workflow Status`: memoria minima para evitar dobles incrementos ante webhooks repetidos o ediciones redundantes
+- `Review Source`: `Frame.io`, `Workflow`, `Auto`
+- `Client Change Round Final`: capa unificada para reporting
+
+Regla de negocio prevista para `Workflow Change Round`:
+- `En curso` o `Cambios Solicitados` -> `Listo para revision`:
+  - abre una nueva ronda
+  - incrementa `Workflow Change Round`
+  - pone `Workflow Review Open = true`
+- `Listo para revision` -> `Cambios Solicitados`:
+  - no incrementa
+  - pone `Workflow Review Open = false`
+- `Listo para revision` -> `Listo`:
+  - no incrementa
+  - pone `Workflow Review Open = false`
+
+Unificacion prevista de reporting:
+- `Client Change Round Final` elegira el origen correcto
+  - si `Review Source = Frame.io`, usa `Client Change Round`
+  - si `Review Source = Workflow`, usa `Workflow Change Round`
+  - si `Review Source = Auto`, usa `Frame Asset ID` para decidir
+- `RpA` y `Semaforo RpA` pueden mantenerse mientras se migran vistas y charts, pero deberian pasar a depender de `Client Change Round Final`
+
+Estrategia de rollout prevista:
+1. agregar propiedades nuevas sin tocar la logica de Frame.io
+2. implementar la rama `Workflow` en la Cloud Function para tareas sin `Frame Asset ID`
+3. mover reporting a `Client Change Round Final`
+4. decidir despues si `RpA` y `Semaforo RpA` siguen teniendo valor o quedan redundantes
+
 ### Plan recomendado para la eventual feature
 
 1. Fase 1, segura:

@@ -358,6 +358,18 @@
   - This merge only updated the repository branch; no production deploy was performed in this step
   - After the merge, local `main` was ahead of `origin/main` and ready to be pushed
 
+## 2026-03-07 18:20 America/Santiago - Codex
+
+- Task: Document the planned Notion-only review-round architecture before implementation
+- Files changed: `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Re-read the live `Tareas` schema and confirmed it already has `Estado`, `Fecha de envío a revisión`, `Fecha de retorno`, `Client Change Round`, `RpA`, `Semáforo RpA`, and a related `Revisiones` data source
+  - Re-read the `Revisiones` data source and confirmed it is useful as an optional log, but too manual to be the source of truth for round counting
+- Notes:
+  - The documented plan keeps the round logic in the Cloud Function, not in Notion formulas or chained automations
+  - Planned new properties for the implementation phase are `Workflow Change Round`, `Workflow Review Open`, `Last Workflow Status`, `Review Source`, and `Client Change Round Final`
+  - `RpA` and `Semáforo RpA` are intentionally kept for now and would later point at the unified final round field
+
 ## Template
 
 Copy this block for the next handoff:

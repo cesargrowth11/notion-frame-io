@@ -14,6 +14,7 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 ### Documentacion
 - Se alinearon `README.md`, `project_context.md` y `BUGS.md` con la nueva semantica version-based de `Client Change Round` antes de validar el branch para merge.
 - Se agrego trazabilidad explicita de que la fix fue validada en staging y sigue pendiente de merge a `main`.
+- Se documento el plan para extender la logica de rondas a tareas que no pasan por Frame.io, manteniendo la logica en la Cloud Function y separando el origen `Frame.io` del origen `Workflow` antes de implementarlo.
 
 ## [2.3.2] - 2026-03-07
 

@@ -78,6 +78,31 @@ La funcion solo escribe senales base en Notion. Las formulas de `RpA` y `Semafor
 - si una pagina ya arrastra un `Client Change Round` mayor que `Last Reviewed Version` por la logica anterior, el runtime la autocorrige al proximo procesamiento
 - no usa `Cambios Solicitados` como senal principal mientras `BUG-006` siga abierto
 
+### Plan documentado para piezas que no pasan por Frame.io
+
+No todas las piezas van a revisarse en Frame.io. Para PDFs, brochures, landing pages u otros entregables revisados por otros canales, el plan es mantener la logica de rondas en la Cloud Function, no en automations complejas de Notion.
+
+Arquitectura propuesta:
+- mantener `Client Change Round` para tareas respaldadas por `Frame Asset ID`
+- agregar un contador separado de workflow para tareas sin `Frame Asset ID`
+- unificar reporting con una propiedad final calculada en Notion
+
+Propiedades previstas:
+- `Workflow Change Round`
+- `Workflow Review Open`
+- `Last Workflow Status`
+- `Review Source`
+- `Client Change Round Final`
+
+Regla de negocio prevista para tareas sin Frame.io:
+- `En curso` o `Cambios Solicitados` -> `Listo para revision` abre una nueva ronda
+- `Listo para revision` -> `Cambios Solicitados` no incrementa la ronda, solo la devuelve a trabajo
+- `Listo para revision` -> `Listo` cierra la revision sin incrementar
+
+Capas de reporting:
+- `RpA` y `Semaforo RpA` pueden mantenerse, pero deberian pasar a depender de `Client Change Round Final`
+- la base `Revisiones` queda como bitacora opcional o auto-generada, no como fuente critica del conteo
+
 ## Arquitectura
 
 ```text
