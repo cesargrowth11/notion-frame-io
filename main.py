@@ -30,10 +30,17 @@ import requests
 # =============================================
 
 # Frame.io V4
-FRAMEIO_ACCESS_TOKEN = os.environ.get("FRAMEIO_ACCESS_TOKEN")
 FRAMEIO_ACCOUNT_ID = os.environ.get("FRAMEIO_ACCOUNT_ID")
 FRAMEIO_PROJECT_ID = os.environ.get("FRAMEIO_PROJECT_ID")
 FRAMEIO_STATUS_FIELD_ID = os.environ.get("FRAMEIO_STATUS_FIELD_ID")
+
+# Token management (mutable at runtime)
+_tokens = {
+    "access_token": os.environ.get("FRAMEIO_ACCESS_TOKEN", ""),
+    "refresh_token": os.environ.get("FRAMEIO_REFRESH_TOKEN", ""),
+    "client_id": os.environ.get("FRAMEIO_CLIENT_ID", ""),
+    "client_secret": os.environ.get("FRAMEIO_CLIENT_SECRET", ""),
+}
 
 # Notion
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
@@ -55,6 +62,97 @@ STATUS_MAP = {
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notion-frameio-sync")
+
+# =============================================
+# FRAME.IO TOKEN AUTO-REFRESH
+# =============================================
+
+_ADOBE_TOKEN_URL = "https://ims-na1.adobelogin.com/ims/token/v3"
+_GCF_FUNCTION_NAME = os.environ.get(
+    "K_SERVICE", "notion-frameio-sync"
+)
+_GCF_REGION = os.environ.get("FUNCTION_REGION", "us-central1")
+_GCP_PROJECT = os.environ.get("GCP_PROJECT", os.environ.get("GCLOUD_PROJECT", "efeonce-group"))
+
+
+def _refresh_access_token() -> str | None:
+    """Exchange refresh_token for a new access_token via Adobe IMS."""
+    if not _tokens["refresh_token"] or not _tokens["client_id"] or not _tokens["client_secret"]:
+        logger.error("Cannot refresh: missing refresh_token, client_id, or client_secret")
+        return None
+
+    resp = requests.post(_ADOBE_TOKEN_URL, data={
+        "grant_type": "refresh_token",
+        "client_id": _tokens["client_id"],
+        "client_secret": _tokens["client_secret"],
+        "refresh_token": _tokens["refresh_token"],
+    }, timeout=30)
+
+    if resp.status_code != 200:
+        logger.error(f"Token refresh failed: {resp.status_code} {resp.text[:300]}")
+        return None
+
+    data = resp.json()
+    new_access = data.get("access_token", "")
+    new_refresh = data.get("refresh_token", _tokens["refresh_token"])
+
+    if not new_access:
+        logger.error("Token refresh returned empty access_token")
+        return None
+
+    _tokens["access_token"] = new_access
+    _tokens["refresh_token"] = new_refresh
+    logger.info("Token refreshed successfully")
+
+    # Persist new tokens to Cloud Function env vars
+    _update_cloud_function_env(new_access, new_refresh)
+
+    return new_access
+
+
+def _update_cloud_function_env(new_access: str, new_refresh: str):
+    """Update the Cloud Function's environment variables with new tokens."""
+    try:
+        from google.cloud.functions_v2 import FunctionServiceClient, UpdateFunctionRequest
+        from google.cloud.functions_v2.types import Function
+        from google.protobuf import field_mask_pb2
+
+        client = FunctionServiceClient()
+        func_name = f"projects/{_GCP_PROJECT}/locations/{_GCF_REGION}/functions/{_GCF_FUNCTION_NAME}"
+
+        function = client.get_function(name=func_name)
+        env_vars = dict(function.service_config.environment_variables)
+        env_vars["FRAMEIO_ACCESS_TOKEN"] = new_access
+        env_vars["FRAMEIO_REFRESH_TOKEN"] = new_refresh
+        function.service_config.environment_variables = env_vars
+
+        update_request = UpdateFunctionRequest(
+            function=function,
+            update_mask=field_mask_pb2.FieldMask(paths=["service_config.environment_variables"]),
+        )
+        operation = client.update_function(request=update_request)
+        logger.info(f"Cloud Function env update started: {operation.metadata}")
+    except Exception as e:
+        logger.warning(f"Could not update Cloud Function env vars (tokens refreshed in memory only): {e}")
+
+
+def _fio_request(method: str, url: str, **kwargs) -> requests.Response:
+    """Make a Frame.io API request with automatic token refresh on 401."""
+    headers = kwargs.pop("headers", {})
+    headers["Authorization"] = f"Bearer {_tokens['access_token']}"
+    headers.setdefault("Content-Type", "application/json")
+
+    r = requests.request(method, url, headers=headers, **kwargs)
+
+    if r.status_code == 401:
+        logger.warning("Frame.io returned 401, attempting token refresh...")
+        new_token = _refresh_access_token()
+        if new_token:
+            headers["Authorization"] = f"Bearer {new_token}"
+            r = requests.request(method, url, headers=headers, **kwargs)
+
+    return r
+
 
 # =============================================
 # FRAME.IO URL PARSER
@@ -90,14 +188,10 @@ def parse_asset_id(url_or_id: str) -> str | None:
 _FIO = "https://api.frame.io"
 
 
-def _fio_h():
-    return {"Authorization": f"Bearer {FRAMEIO_ACCESS_TOKEN}", "Content-Type": "application/json"}
-
-
 def fio_update_status(asset_id: str, status_uuid: str):
     url = f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/projects/{FRAMEIO_PROJECT_ID}/metadata/values"
     body = {"data": {"asset_ids": [asset_id], "values": [{"field_definition_id": FRAMEIO_STATUS_FIELD_ID, "value": [status_uuid]}]}}
-    r = requests.patch(url, headers=_fio_h(), json=body, timeout=30)
+    r = _fio_request("PATCH", url, json=body, timeout=30)
     logger.info(f"Frame.io PATCH status: {r.status_code}")
     r.raise_for_status()
     return r.json()
@@ -109,23 +203,23 @@ def fio_get_counts(asset_id: str) -> dict:
 
     # --- Try V2 first (more reliable for version stacks) ---
     try:
-        r = requests.get(f"{_FIO}/v2/assets/{asset_id}", headers=_fio_h(), timeout=15)
+        r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}", timeout=15)
         if r.status_code == 200:
             d = r.json()
             out["comments"] = d.get("comment_count", 0)
 
             # If the asset itself is a version_stack
             if d.get("type") == "version_stack":
-                ch = requests.get(f"{_FIO}/v2/assets/{asset_id}/children", headers=_fio_h(), timeout=15)
+                ch = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}/children", timeout=15)
                 if ch.status_code == 200:
                     children = ch.json()
                     out["versions"] = len(children) if isinstance(children, list) else 1
 
             # If the asset is inside a version_stack
             elif d.get("parent_id"):
-                pr = requests.get(f"{_FIO}/v2/assets/{d['parent_id']}", headers=_fio_h(), timeout=15)
+                pr = _fio_request("GET", f"{_FIO}/v2/assets/{d['parent_id']}", timeout=15)
                 if pr.status_code == 200 and pr.json().get("type") == "version_stack":
-                    ch = requests.get(f"{_FIO}/v2/assets/{d['parent_id']}/children", headers=_fio_h(), timeout=15)
+                    ch = _fio_request("GET", f"{_FIO}/v2/assets/{d['parent_id']}/children", timeout=15)
                     if ch.status_code == 200:
                         children = ch.json()
                         out["versions"] = len(children) if isinstance(children, list) else 1
@@ -324,7 +418,7 @@ def sync_status(request):
     if request.method == "GET":
         return jsonify({
             "service": "notion-frameio-sync",
-            "version": "2.0.0",
+            "version": "2.1.0",
             "status": "ok",
             "endpoints": ["/notion-webhook", "/frameio-webhook"],
             "mapping": {k: ("ok" if v else "NOT SET") for k, v in STATUS_MAP.items()},
@@ -334,7 +428,7 @@ def sync_status(request):
     if request.method != "POST":
         return jsonify({"error": "Method not allowed"}), 405
 
-    missing = [k for k, v in {"FRAMEIO_ACCESS_TOKEN": FRAMEIO_ACCESS_TOKEN, "NOTION_TOKEN": NOTION_TOKEN}.items() if not v]
+    missing = [k for k, v in {"FRAMEIO_ACCESS_TOKEN": _tokens["access_token"], "NOTION_TOKEN": NOTION_TOKEN}.items() if not v]
     if missing:
         return jsonify({"error": "Missing env vars", "missing": missing}), 500
 
