@@ -67,6 +67,10 @@ PROP_LAST_COMMENT_TIMECODE = os.environ.get("NOTION_PROP_LAST_COMMENT_TIMECODE",
 PROP_LAST_REVIEWED_VERSION = os.environ.get("NOTION_PROP_LAST_REVIEWED_VERSION", "Last Reviewed Version")
 PROP_CLIENT_REVIEW_OPEN = os.environ.get("NOTION_PROP_CLIENT_REVIEW_OPEN", "Client Review Open")
 PROP_CHANGE_ROUND = os.environ.get("NOTION_PROP_CHANGE_ROUND", "Client Change Round")
+PROP_WORKFLOW_CHANGE_ROUND = os.environ.get("NOTION_PROP_WORKFLOW_CHANGE_ROUND", "Workflow Change Round")
+PROP_WORKFLOW_REVIEW_OPEN = os.environ.get("NOTION_PROP_WORKFLOW_REVIEW_OPEN", "Workflow Review Open")
+PROP_LAST_WORKFLOW_STATUS = os.environ.get("NOTION_PROP_LAST_WORKFLOW_STATUS", "Last Workflow Status")
+PROP_REVIEW_SOURCE = os.environ.get("NOTION_PROP_REVIEW_SOURCE", "Review Source")
 
 # Status mapping: Notion status name -> Frame.io status UUID
 STATUS_MAP = {
@@ -99,6 +103,10 @@ def _normalize_text(value: str | None) -> str:
 
 
 _NORMALIZED_STATUS_MAP = {_normalize_text(k): v for k, v in STATUS_MAP.items() if k}
+_STATUS_REVIEW = _normalize_text("Listo para revision")
+_STATUS_CHANGES = _normalize_text("Cambios Solicitados")
+_STATUS_IN_PROGRESS = _normalize_text("En curso")
+_STATUS_DONE = _normalize_text("Listo")
 
 
 def _status_uuid_for(status: str | None) -> str:
@@ -597,6 +605,19 @@ def _notion_prop_plain_text(props: dict, name: str, default: str = "") -> str:
     return default
 
 
+def _notion_prop_select_name(props: dict, name: str, default: str = "") -> str:
+    prop = props.get(name, {})
+    if not isinstance(prop, dict):
+        return default
+    select_value = prop.get("select", {})
+    if isinstance(select_value, dict) and select_value.get("name"):
+        return select_value["name"]
+    status_value = prop.get("status", {})
+    if isinstance(status_value, dict) and status_value.get("name"):
+        return status_value["name"]
+    return default
+
+
 def _notion_annotations(*, bold: bool = False) -> dict:
     return {
         "bold": bold,
@@ -655,6 +676,41 @@ def notion_calculate_review_state(page: dict | None, versions: int, comment_sign
 
     if comment_signals.get("last_comment_id"):
         state["last_comment_id"] = comment_signals["last_comment_id"]
+
+    return state
+
+
+def notion_calculate_workflow_review_state(page: dict | None, status: str | None) -> dict:
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    normalized_status = _normalize_text(status)
+    previous_status = _normalize_text(_notion_prop_plain_text(props, PROP_LAST_WORKFLOW_STATUS, ""))
+    previous_round = _notion_prop_number(props, PROP_WORKFLOW_CHANGE_ROUND, 0)
+    state = {
+        "workflow_change_round": previous_round,
+        "workflow_review_open": _notion_prop_checkbox(props, PROP_WORKFLOW_REVIEW_OPEN, False),
+        "last_workflow_status": status or "",
+    }
+
+    if not normalized_status:
+        return state
+
+    enters_review = normalized_status == _STATUS_REVIEW
+    returns_to_work = normalized_status == _STATUS_CHANGES
+    closes_review = normalized_status == _STATUS_DONE
+    was_in_review = previous_status == _STATUS_REVIEW
+    came_from_work = previous_status in {
+        _STATUS_IN_PROGRESS,
+        _STATUS_CHANGES,
+    }
+    bootstrap_first_round = not previous_status and previous_round == 0
+
+    if enters_review:
+        if not state["workflow_review_open"] and (came_from_work or bootstrap_first_round):
+            state["workflow_change_round"] += 1
+        state["workflow_review_open"] = True
+    elif returns_to_work or closes_review:
+        if was_in_review or state["workflow_review_open"]:
+            state["workflow_review_open"] = False
 
     return state
 
@@ -735,6 +791,7 @@ def notion_update_counts(
     asset_id: str | None = None,
     comment_signals: dict | None = None,
     review_state: dict | None = None,
+    workflow_review_state: dict | None = None,
 ):
     """Set sync inputs and review signals on a Notion page."""
     props = {
@@ -760,6 +817,11 @@ def notion_update_counts(
         props[PROP_CLIENT_REVIEW_OPEN] = {"checkbox": review_state.get("client_review_open", False)}
         props[PROP_CHANGE_ROUND] = {"number": review_state.get("client_change_round", 0)}
 
+    if workflow_review_state:
+        props[PROP_WORKFLOW_CHANGE_ROUND] = {"number": workflow_review_state.get("workflow_change_round", 0)}
+        props[PROP_WORKFLOW_REVIEW_OPEN] = {"checkbox": workflow_review_state.get("workflow_review_open", False)}
+        props[PROP_LAST_WORKFLOW_STATUS] = _notion_rich_text_prop(workflow_review_state.get("last_workflow_status", ""))
+
     r = requests.patch(f"{_NOTION}/pages/{page_id}", headers=_not_h(), json={"properties": props}, timeout=15)
     if asset_id and r.status_code == 400:
         logger.warning(f"Notion asset ID property update failed, retrying counts-only patch: {r.text[:300]}")
@@ -774,6 +836,9 @@ def notion_update_counts(
             PROP_LAST_REVIEWED_VERSION,
             PROP_CLIENT_REVIEW_OPEN,
             PROP_CHANGE_ROUND,
+            PROP_WORKFLOW_CHANGE_ROUND,
+            PROP_WORKFLOW_REVIEW_OPEN,
+            PROP_LAST_WORKFLOW_STATUS,
         ]:
             props.pop(optional_prop, None)
         r = requests.patch(f"{_NOTION}/pages/{page_id}", headers=_not_h(), json={"properties": props}, timeout=15)
@@ -896,6 +961,7 @@ def handle_notion(request):
 
     logger.info(f"Notion webhook: {json.dumps(payload)[:800]}")
     asset_id, status, page_id = parse_notion_payload(payload)
+    page = None
 
     if page_id and (not asset_id or not status):
         page = notion_get_page(page_id)
@@ -906,6 +972,39 @@ def handle_notion(request):
             })
             asset_id = asset_id or recovered_asset_id
             status = status or recovered_status
+
+    if page_id and page is None:
+        page = notion_get_page(page_id)
+
+    props = page.get("properties", {}) if isinstance(page, dict) else {}
+    review_source = _normalize_text(_notion_prop_select_name(props, PROP_REVIEW_SOURCE, "Auto"))
+    workflow_forced = review_source == _normalize_text("Workflow")
+    frameio_forced = review_source == _normalize_text("Frame.io")
+    workflow_only = page_id and status and (workflow_forced or (not frameio_forced and not asset_id))
+
+    if workflow_only:
+        try:
+            workflow_review_state = notion_calculate_workflow_review_state(page, status)
+            notion_update_counts(
+                page_id,
+                _notion_prop_number(props, PROP_VERSIONS, 0),
+                _notion_prop_number(props, PROP_COMMENTS, 0),
+                workflow_review_state=workflow_review_state,
+            )
+            return jsonify({
+                "success": True,
+                "workflow_only": True,
+                "status": status,
+                "review_source": "Workflow" if workflow_forced else "Auto",
+                "workflow_review_state": workflow_review_state,
+            }), 200
+        except Exception as e:
+            logger.error(f"Workflow-only round update error: {e}")
+            return jsonify({
+                "error": "Workflow-only round update failed",
+                "status": status,
+                "details": str(e),
+            }), 500
 
     if not asset_id:
         return jsonify({
