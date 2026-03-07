@@ -345,6 +345,19 @@
   - This validated the real self-heal path against production data while keeping the main production function untouched
   - The branch is now ready for merge review if you want to promote the fix
 
+## 2026-03-07 17:50 America/Santiago - Codex
+
+- Task: Merge the validated `Client Change Round` fix branch into `main`
+- Files changed: `HANDOFF.md`
+- Verification:
+  - Fast-forward merged `feature/client-change-round-version-logic` into local `main`
+  - `python -m py_compile main.py`
+  - Checked live health endpoint on `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync`
+  - Live production remained `status: ok`, `version: 2.3.2`, with all mappings in `ok`
+- Notes:
+  - This merge only updated the repository branch; no production deploy was performed in this step
+  - After the merge, local `main` was ahead of `origin/main` and ready to be pushed
+
 ## Template
 
 Copy this block for the next handoff:
