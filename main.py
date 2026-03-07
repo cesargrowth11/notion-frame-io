@@ -21,6 +21,7 @@ import os
 import re
 import json
 import logging
+import unicodedata
 import functions_framework
 from flask import jsonify
 import requests
@@ -62,6 +63,21 @@ STATUS_MAP = {
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notion-frameio-sync")
+
+
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKD", value.strip())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(normalized.split()).lower()
+
+
+_NORMALIZED_STATUS_MAP = {_normalize_text(k): v for k, v in STATUS_MAP.items() if k}
+
+
+def _status_uuid_for(status: str | None) -> str:
+    return _NORMALIZED_STATUS_MAP.get(_normalize_text(status), "")
 
 # =============================================
 # FRAME.IO TOKEN AUTO-REFRESH
@@ -163,6 +179,7 @@ _URL_PATTERNS = [
     r"frame\.io/reviews/[^/]+/asset/([a-f0-9\-]{36})",
     r"frame\.io/reviews/[^/]+/([a-f0-9\-]{36})",
     r"frame\.io/(?:v4/)?projects/[^/]+/files/([a-f0-9\-]{36})",
+    r"next\.frame\.io/project/[^/]+/view/([a-f0-9\-]{36})",
     r"frame\.io/.*?([a-f0-9\-]{36})(?:\?|#|$)",
 ]
 _UUID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
@@ -343,6 +360,15 @@ def notion_find_page(asset_id: str) -> str | None:
     return None
 
 
+def notion_get_page(page_id: str) -> dict | None:
+    """Fetch a Notion page to recover properties when webhook payload is minimal."""
+    r = requests.get(f"{_NOTION}/pages/{page_id}", headers=_not_h(), timeout=15)
+    if r.status_code == 200:
+        return r.json()
+    logger.warning(f"Could not fetch Notion page {page_id}: {r.status_code} {r.text[:300]}")
+    return None
+
+
 def notion_update_counts(page_id: str, versions: int, comments: int):
     """Set Frame Versions and Frame Comments on a Notion page."""
     props = {
@@ -363,47 +389,69 @@ def parse_notion_payload(payload: dict) -> tuple[str | None, str | None, str | N
     Returns (frame_asset_id, notion_status, notion_page_id)
     """
     data = payload.get("data", payload)
+    data_sources = []
+    if isinstance(data, dict):
+        data_sources.append(data)
+        props = data.get("properties")
+        if isinstance(props, dict):
+            data_sources.append(props)
+    elif isinstance(payload, dict):
+        data_sources.append(payload)
+
     asset_id = None
     status = None
-    page_id = data.get("page_id", data.get("id"))
+    page_id = None
+
+    for source in data_sources:
+        if not page_id:
+            page_id = source.get("page_id") or source.get("id")
+        page = source.get("page")
+        if not page_id and isinstance(page, dict):
+            page_id = page.get("id")
 
     # -- Frame URL --
-    for key in [PROP_FRAME_URL, "URL Frame.io", "Frame URL", "Entregable"]:
-        prop = data.get(key)
-        if not prop:
-            continue
-        raw = None
-        if isinstance(prop, str):
-            raw = prop
-        elif isinstance(prop, dict):
-            t = prop.get("type", "")
-            if t == "url":
-                raw = prop.get("url", "")
-            elif t == "rich_text":
-                tx = prop.get("rich_text", [])
-                raw = tx[0].get("plain_text", "") if tx else None
-            elif "url" in prop:
-                raw = prop["url"]
-        if raw:
-            asset_id = parse_asset_id(raw)
-            if asset_id:
-                break
+    for source in data_sources:
+        for key in [PROP_FRAME_URL, "URL Frame.io", "Frame URL", "Entregable"]:
+            prop = source.get(key)
+            if not prop:
+                continue
+            raw = None
+            if isinstance(prop, str):
+                raw = prop
+            elif isinstance(prop, dict):
+                t = prop.get("type", "")
+                if t == "url":
+                    raw = prop.get("url", "")
+                elif t == "rich_text":
+                    tx = prop.get("rich_text", [])
+                    raw = tx[0].get("plain_text", "") if tx else None
+                elif "url" in prop:
+                    raw = prop["url"]
+            if raw:
+                asset_id = parse_asset_id(raw)
+                if asset_id:
+                    break
+        if asset_id:
+            break
 
     # -- Status --
-    for key in [PROP_STATUS, "Estado", "Status"]:
-        prop = data.get(key)
-        if not prop:
-            continue
-        if isinstance(prop, str):
-            status = prop.strip()
-        elif isinstance(prop, dict):
-            t = prop.get("type", "")
-            if t == "status":
-                o = prop.get("status", {})
-                status = o.get("name", "").strip() if o else None
-            elif t == "select":
-                o = prop.get("select", {})
-                status = o.get("name", "").strip() if o else None
+    for source in data_sources:
+        for key in [PROP_STATUS, "Estado", "Status"]:
+            prop = source.get(key)
+            if not prop:
+                continue
+            if isinstance(prop, str):
+                status = prop.strip()
+            elif isinstance(prop, dict):
+                t = prop.get("type", "")
+                if t == "status":
+                    o = prop.get("status", {})
+                    status = o.get("name", "").strip() if o else None
+                elif t == "select":
+                    o = prop.get("select", {})
+                    status = o.get("name", "").strip() if o else None
+            if status:
+                break
         if status:
             break
 
@@ -424,15 +472,26 @@ def handle_notion(request):
     logger.info(f"Notion webhook: {json.dumps(payload)[:800]}")
     asset_id, status, page_id = parse_notion_payload(payload)
 
+    if page_id and (not asset_id or not status):
+        page = notion_get_page(page_id)
+        if page:
+            recovered_asset_id, recovered_status, _ = parse_notion_payload({
+                "data": page.get("properties", {}),
+                "page_id": page_id,
+            })
+            asset_id = asset_id or recovered_asset_id
+            status = status or recovered_status
+
     if not asset_id:
         return jsonify({"skipped": True, "reason": "No Frame.io URL in this task", "hint": f"Fill '{PROP_FRAME_URL}' in the Notion page"}), 200
 
     result = {"asset_id": asset_id, "status": status}
 
     # 1) Update Frame.io status
-    if status and status in STATUS_MAP and STATUS_MAP[status]:
+    status_uuid = _status_uuid_for(status)
+    if status and status_uuid:
         try:
-            fio_update_status(asset_id, STATUS_MAP[status])
+            fio_update_status(asset_id, status_uuid)
             result["frameio_status"] = "updated"
         except Exception as e:
             result["frameio_status_error"] = str(e)
@@ -505,7 +564,7 @@ def sync_status(request):
     if request.method == "GET":
         return jsonify({
             "service": "notion-frameio-sync",
-            "version": "2.2.0",
+            "version": "2.3.0",
             "status": "ok",
             "endpoints": ["/notion-webhook", "/frameio-webhook"],
             "mapping": {k: ("ok" if v else "NOT SET") for k, v in STATUS_MAP.items()},
