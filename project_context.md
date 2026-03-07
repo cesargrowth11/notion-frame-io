@@ -436,6 +436,71 @@ gcloud functions deploy notion-frameio-sync \
 - `Last Frame Comment By` aun no existe porque el payload real disponible no trae actor enriquecido en la ruta que estamos usando
 - el endpoint de webhook de Frame.io sigue sin verificacion de firma
 
+## Feature plan: atribuir version a cada comentario de Frame.io
+
+Problema actual:
+- los assets pueden tener varias versiones dentro de un version stack
+- hoy el runtime trae comentarios y el ultimo comentario visible, pero no expone a que numero de version pertenece ese comentario
+- en Notion eso impide distinguir si el feedback corresponde a la version actual o a una version previa
+
+Factibilidad tecnica confirmada:
+- `GET /v4/accounts/{account_id}/comments/{comment_id}` expone `file_id`
+- el recurso file expone `parent_id`
+- Frame.io define el version stack como un contenedor ordenado de files y declara que ese orden determina el numero de version
+- el changelog oficial ya declara estable `GET list version stack children`
+
+Interpretacion operativa adoptada:
+- el numero de version no se toma del comentario directamente
+- se infiere desde la posicion actual del `file_id` del comentario dentro de los children del version stack
+- esa posicion se expresa como version 1-based
+- el dato debe considerarse contextual y recalculable, no historicamente inmutable, porque Frame.io permite reordenar el stack
+
+Primera fase recomendada:
+1. agregar propiedad de Notion:
+   - `Last Frame Comment Version`
+2. extender runtime:
+   - helper nuevo tipo `fio_resolve_file_version_ordinal(file_id)`
+   - `fio_get_comment_signals()` pasa a devolver `last_comment_version`
+   - `format_frameio_comment_for_notion()` agrega linea `Version: N` cuando el dato exista
+3. no intentar en v1:
+   - backfill completo del historial de comentarios
+   - matriz de conteos por version
+   - persistencia historica fija del numero si el stack cambia de orden
+
+Algoritmo exacto propuesto:
+1. obtener el comentario o el ultimo comentario relevante
+2. resolver su `file_id`
+3. leer el file:
+   - si no tiene parent version stack, devolver `1`
+4. si el parent es version stack:
+   - listar children del stack
+   - buscar el `file_id` dentro del listado
+   - devolver `index + 1`
+5. si no se encuentra el file en el stack:
+   - devolver vacio en vez de adivinar
+
+Puntos de integracion previstos en `main.py`:
+- `fio_get_comment()` y `fio_comment_file_id()` ya resuelven el `file_id` del comentario
+- `fio_get_comment_signals()` puede enriquecerse con `last_comment_version`
+- `maybe_mirror_frameio_comment_to_notion()` puede mostrar `Version: N` en el comentario espejo
+- `notion_update_counts()` puede escribir `Last Frame Comment Version`
+
+Riesgos y limites:
+- el orden del version stack puede cambiar y con eso el numero calculado tambien
+- si se quisiera versionar todos los comentarios de un asset en una sola pasada, el costo de API crece
+- para mantener bajo riesgo, la v1 deberia resolver solo:
+  - el ultimo comentario
+  - el comentario puntual del webhook `comment.created`
+
+Plan de rollout recomendado:
+1. agregar schema de Notion para `Last Frame Comment Version`
+2. implementar helper de resolucion de version en una feature branch
+3. validar con:
+   - asset sin version stack
+   - asset con varias versiones
+   - comentario sobre version vieja
+4. despues decidir si vale la pena ampliar a historiales completos o reportes por version
+
 ## Documentacion complementaria
 
 - Ver `CHANGELOG.md`

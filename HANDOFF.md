@@ -402,6 +402,22 @@
   - The merge was validated locally before being committed, so no rollback was needed
   - This step updates repository `main` only; production deployment remains a separate decision
 
+## 2026-03-07 19:05 America/Santiago - Codex
+
+- Task: Investigate and document the implementation plan for showing which asset version each Frame.io comment belongs to
+- Files changed: `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Re-read current runtime paths for comments, counts, version stacks, and mirrored Notion comments in `main.py`
+  - Confirmed current runtime does not persist or display comment-to-version attribution
+  - Verified against official Frame.io docs that:
+    - comments expose `file_id`
+    - version stacks are ordered containers whose order determines version number
+    - `GET list version stack children` is stable
+- Notes:
+  - The documented plan infers `Version N` from the comment's `file_id` and the current ordered children of its version stack
+  - This is technically viable, but the number should be treated as operational context rather than immutable history because Frame.io allows stack reordering
+  - Recommended first release is intentionally narrow: `Last Frame Comment Version` plus `Version: N` in mirrored Notion comments
+
 ## Template
 
 Copy this block for the next handoff:

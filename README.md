@@ -215,6 +215,48 @@ gcloud functions deploy notion-frameio-sync \
 - aunque la URL es el input manual inicial, el runtime actual conserva `Frame Asset ID` como referencia estable para evitar regresiones si la URL cambia o queda desactualizada
 - el mirror de comentarios hacia Notion Comments ya fue validado y quedo habilitado en produccion para `comment.created`
 
+## Plan documentado: version de cada comentario de Frame.io
+
+Problema:
+- hoy el sistema trae comentarios y espeja `comment.created`, pero no indica a que numero de version pertenece cada comentario
+- eso vuelve ambiguo el feedback cuando un asset ya tiene varias versiones en su version stack
+
+Factibilidad tecnica confirmada:
+- el comentario V4 expone `file_id`
+- el file expone `parent_id`
+- Frame.io define el version stack como un contenedor ordenado de files y declara que ese orden determina el numero de version
+- existe endpoint estable para listar children del version stack
+
+Decision tecnica documentada:
+- el numero de version se inferira desde la posicion actual del `file_id` del comentario dentro de los children ordenados del version stack
+- el numero sera 1-based (`Version 1`, `Version 2`, etc.)
+- ese dato debe tratarse como contexto operativo actual, no como identificador historico inmutable, porque Frame.io permite reordenar el stack
+
+Alcance recomendado de la primera implementacion:
+- agregar una propiedad de Notion `Last Frame Comment Version`
+- extender `fio_get_comment_signals()` para devolver `last_comment_version`
+- extender el mirror de comentarios para mostrar `Version: N` junto al comentario espejado en Notion
+- no intentar backfill completo de todos los comentarios en v1
+
+Algoritmo propuesto:
+1. leer el comentario (`GET /comments/{comment_id}` o listado de comentarios del file)
+2. resolver su `file_id`
+3. leer ese file y obtener `parent_id`
+4. si el parent no es un version stack:
+   - tratar el comentario como `Version 1`
+5. si el parent es un version stack:
+   - listar los children ordenados del stack
+   - ubicar la posicion del `file_id` del comentario
+   - convertir esa posicion a version 1-based
+6. escribir `Last Frame Comment Version` y, si el mirror esta activo, agregar `Version: N` al comentario espejado
+
+Riesgos y limites documentados:
+- si el stack se reordena, el numero puede cambiar en recalculos futuros
+- calcular la version de todos los comentarios de un asset es mas costoso que calcular solo la del ultimo comentario o la del comentario del webhook
+- la primera iteracion deberia limitarse a:
+  - ultimo comentario
+  - comentario espejado en Notion
+
 ## Documentacion operativa
 
 - Ver [CHANGELOG.md](CHANGELOG.md) para cambios por version
