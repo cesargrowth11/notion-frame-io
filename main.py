@@ -166,6 +166,76 @@ _URL_PATTERNS = [
     r"frame\.io/.*?([a-f0-9\-]{36})(?:\?|#|$)",
 ]
 _UUID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
+_SHORT_URL_RE = re.compile(r"^https?://(f\.io|fio\.co)/", re.I)
+_VIEW_URL_RE = re.compile(r"next\.frame\.io/.+/view/", re.I)
+
+
+def _resolve_short_url(url: str) -> str | None:
+    """Resolve a shortened f.io URL to its final destination."""
+    try:
+        r = requests.head(url, allow_redirects=True, timeout=10)
+        final = r.url
+        if final and final != url:
+            logger.info(f"Resolved short URL: {url} -> {final}")
+            return final
+    except Exception as e:
+        logger.warning(f"Failed to resolve short URL {url}: {e}")
+    return None
+
+
+def _search_project_for_url(original_url: str) -> str | None:
+    """Search all assets in the project comparing view_url with the given URL."""
+    if not FRAMEIO_ACCOUNT_ID or not FRAMEIO_PROJECT_ID:
+        return None
+
+    try:
+        # Get project root folder
+        url = f"{_FIO}/v2/projects/{FRAMEIO_PROJECT_ID}"
+        r = _fio_request("GET", url, timeout=15)
+        if r.status_code != 200:
+            logger.warning(f"Cannot get project info: {r.status_code}")
+            return None
+
+        root_asset_id = r.json().get("root_asset_id")
+        if not root_asset_id:
+            return None
+
+        # Search children recursively (max 2 levels to avoid timeout)
+        return _search_children_for_url(root_asset_id, original_url, depth=0, max_depth=2)
+    except Exception as e:
+        logger.warning(f"Project search error: {e}")
+        return None
+
+
+def _search_children_for_url(parent_id: str, target_url: str, depth: int, max_depth: int) -> str | None:
+    """Recursively search children for an asset whose view_url matches."""
+    r = _fio_request("GET", f"{_FIO}/v2/assets/{parent_id}/children?page_size=50", timeout=15)
+    if r.status_code != 200:
+        return None
+
+    children = r.json()
+    if not isinstance(children, list):
+        return None
+
+    for child in children:
+        child_id = child.get("id", "")
+        # Check if the target URL contains this asset's ID
+        if child_id and child_id in target_url:
+            return child_id
+
+        # Check view_url or _links
+        for url_field in ["view_url", "original_url"]:
+            val = child.get(url_field, "")
+            if val and (val == target_url or target_url in val or val in target_url):
+                return child_id
+
+        # Recurse into folders and version stacks
+        if depth < max_depth and child.get("type") in ("folder", "version_stack"):
+            found = _search_children_for_url(child_id, target_url, depth + 1, max_depth)
+            if found:
+                return found
+
+    return None
 
 
 def parse_asset_id(url_or_id: str) -> str | None:
@@ -174,10 +244,27 @@ def parse_asset_id(url_or_id: str) -> str | None:
         return None
     if _UUID_RE.match(s):
         return s
+
+    # Resolve shortened URLs (f.io/xxx, fio.co/xxx)
+    if _SHORT_URL_RE.match(s):
+        resolved = _resolve_short_url(s)
+        if resolved:
+            s = resolved
+
+    # Try standard patterns
     for pat in _URL_PATTERNS:
         m = re.search(pat, s, re.I)
         if m:
             return m.group(1)
+
+    # For next.frame.io view URLs or unrecognized URLs, fallback to project search
+    if _VIEW_URL_RE.search(s) or "frame.io" in s.lower():
+        logger.info(f"URL not matched by patterns, trying project search: {s}")
+        found = _search_project_for_url(s)
+        if found:
+            logger.info(f"Found asset via project search: {found}")
+            return found
+
     logger.warning(f"Cannot extract asset ID from: {s}")
     return None
 
@@ -338,7 +425,7 @@ def handle_notion(request):
     asset_id, status, page_id = parse_notion_payload(payload)
 
     if not asset_id:
-        return jsonify({"error": "No Frame.io URL found in payload", "hint": f"Include '{PROP_FRAME_URL}' in webhook"}), 400
+        return jsonify({"skipped": True, "reason": "No Frame.io URL in this task", "hint": f"Fill '{PROP_FRAME_URL}' in the Notion page"}), 200
 
     result = {"asset_id": asset_id, "status": status}
 
@@ -418,7 +505,7 @@ def sync_status(request):
     if request.method == "GET":
         return jsonify({
             "service": "notion-frameio-sync",
-            "version": "2.1.0",
+            "version": "2.2.0",
             "status": "ok",
             "endpoints": ["/notion-webhook", "/frameio-webhook"],
             "mapping": {k: ("ok" if v else "NOT SET") for k, v in STATUS_MAP.items()},
