@@ -418,6 +418,36 @@
   - This is technically viable, but the number should be treated as operational context rather than immutable history because Frame.io allows stack reordering
   - Recommended first release is intentionally narrow: `Last Frame Comment Version` plus `Version: N` in mirrored Notion comments
 
+## 2026-03-07 19:20 America/Santiago - Codex
+
+- Task: Implement comment-version attribution in a dedicated feature branch
+- Files changed: `main.py`, `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Ran a local stubbed Python check that:
+    - resolved `file-v2` to version ordinal `2` inside a simulated version stack
+    - resolved a standalone file to version `1`
+    - confirmed `format_frameio_comment_for_notion(..., 3)` renders `Version: 3`
+- Notes:
+  - Work is isolated in branch `feature/frameio-comment-version-attribution`
+  - Runtime now prepares `Last Frame Comment Version`, enriches `fio_get_comment_signals()` with `last_comment_version`, and adds `Version: N` to mirrored Notion comments
+  - The Notion write path is tolerant if `Last Frame Comment Version` does not yet exist in the database schema
+  - No deploy or live Notion schema change was performed in this step
+
+## 2026-03-08 00:15 America/Santiago - Codex
+
+- Task: Attempt real validation for comment-version attribution
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Confirmed branch `feature/frameio-comment-version-attribution` was clean and current
+  - Attempted to deploy `notion-frameio-sync-staging` from the branch
+  - Confirmed `gcloud` still has an active account configured, but deploy failed because the local session requires interactive reauthentication
+  - Attempted a direct real-API validation using the local Adobe refresh token and Frame.io endpoints for asset `7f289cd4-b30e-4103-91c8-48042497683a`
+  - The direct Frame.io call still returned `403 Forbidden`, so real validation could not be completed in this session
+- Notes:
+  - The branch remains implemented and locally verified
+  - The next useful step is to restore `gcloud` auth and then validate via staging, or separately confirm why the refreshed direct Frame.io call is returning `403`
+
 ## Template
 
 Copy this block for the next handoff:
@@ -430,3 +460,43 @@ Copy this block for the next handoff:
 - Verification:
 - Notes:
 ```
+
+## 2026-03-08 06:58 America/Santiago - Codex
+
+- Task: Resume real validation for comment-version attribution after restoring Google Cloud auth
+- Files changed: `main.py`, `README.md`, `project_context.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Reauthenticated local `gcloud`, then deployed branch `feature/frameio-comment-version-attribution` to `notion-frameio-sync-staging`
+  - Triggered `POST /frameio-webhook` on staging for file `7f289cd4-b30e-4103-91c8-48042497683a`
+  - Read staging logs for revision `notion-frameio-sync-staging-00006-kit`
+  - Read Notion page `31839c2f-efe7-81dd-8bd3-ca760c9a7a63` directly and confirmed `Last Frame Comment Version = 1`
+- Notes:
+  - Root cause of the earlier `0` value was the resolver's dependency on `GET /v2/assets/{id}`, which returned `401 Not Authorized` for this tenant even after token refresh
+  - The branch now resolves ordinals through V4 `files/{file_id}` and `version_stacks/{version_stack_id}/children`
+  - The basic staging validation is now unblocked and passing
+  - Remaining gap before merge: validate a real multi-version asset so an ordinal greater than `1` is observed end-to-end
+
+## 2026-03-08 07:20 America/Santiago - Codex
+
+- Task: Push validation past `Version = 1` and determine whether a real multi-version asset exists in the current project
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Temporarily deployed staging revisions `00007-ruy` and `00008-hoj` with a non-committed debug scan for version stacks, then restored staging to clean branch revision `00009-qot`
+  - Called the temporary `GET ?debug_version_scan=1` endpoint twice, including a deeper recursive scan
+  - Both scans returned zero version stacks in Frame.io project `5749d3e4-732b-4fc3-b5b2-052081563228`
+- Notes:
+  - The branch logic remains valid and staging is back on the real branch code with no debug endpoint
+  - There is no current project asset that lets us observe `Version > 1` end-to-end
+  - The next validation step requires either uploading a new version over an already linked asset or choosing a different Frame.io project that already contains version stacks
+
+## 2026-03-08 07:36 America/Santiago - Codex
+
+- Task: Register the local-vs-function Frame.io `403` discrepancy as a dedicated technical debt item
+- Files changed: `TASKS.md`, `project_context.md`, `CHANGELOG.md`, `BUGS.md`, `HANDOFF.md`
+- Verification:
+  - Documentation-only update
+  - Confirmed the issue had already been observed repeatedly during local validation attempts, while staging/live Cloud Function reads continued to work
+- Notes:
+  - New tracking item: direct local Frame.io calls can return `403` even when the Cloud Function can read the same resources
+  - This is not a runtime regression in production; it is an investigation gap affecting local diagnostics and future feature validation workflows

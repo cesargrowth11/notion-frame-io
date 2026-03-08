@@ -20,6 +20,8 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
 | `BUG-007` | monitoring | 2026-03-07 | TBD | `Client Change Round` podia sobrecontar rondas al reabrirse feedback sobre la misma version |
 | `BUG-006` | open | 2026-03-07 | — | `Cambios Solicitados` reporta `frameio_status: updated` pero no deja el asset en `Changes requested` |
 
+| `BUG-008` | open | 2026-03-08 | TBD | Llamadas directas locales a Frame.io devuelven `403` mientras la Cloud Function puede leer los mismos recursos |
+
 ## Detalle
 
 ### `BUG-001` Status de Notion con tildes no sincronizaba a Frame.io
@@ -116,3 +118,19 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
   - Pendiente merge a `main` y deploy productivo.
 - Referencias:
   - `CHANGELOG.md` `Unreleased`
+
+### `BUG-008` Llamadas directas locales a Frame.io devuelven `403` mientras la Cloud Function puede leer los mismos recursos
+
+- Sintoma:
+  - Scripts locales o llamadas manuales desde terminal devuelven `403 Forbidden` contra recursos de Frame.io que la Cloud Function si logra leer en staging o produccion.
+- Causa raiz:
+  - Todavia no confirmada. Puede estar en diferencias de contexto de token, account/tenant, secretos vigentes en Secret Manager versus shell local, o alguna politica que afecte solo al flujo manual.
+- Impacto:
+  - Los diagnosticos locales contra la API de Frame.io no son plenamente confiables hoy.
+  - Esto ralentiza validaciones de features y obliga a usar staging o la propia Cloud Function para confirmar comportamientos reales.
+- Estado actual:
+  - El runtime productivo no depende de este flujo local y sigue funcionando.
+  - La deuda queda abierta para investigacion separada antes de volver a usar el shell local como fuente principal de verificacion contra Frame.io.
+- Referencias:
+  - `TASKS.md`
+  - `HANDOFF.md`

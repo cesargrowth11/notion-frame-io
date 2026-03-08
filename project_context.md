@@ -158,6 +158,7 @@ notion-frame-io/
 | `Last Frame Comment ID` | Rich text | ID del ultimo comentario |
 | `Last Frame Comment At` | Date | Fecha del ultimo comentario |
 | `Last Frame Comment Timecode` | Rich text | Timecode del ultimo comentario |
+| `Last Frame Comment Version` | Number | Version inferida del ultimo comentario |
 | `Last Reviewed Version` | Number | Ultima version que ya abrio una ronda contabilizada |
 | `Client Review Open` | Checkbox | Ronda de cliente abierta |
 | `Client Change Round` | Number | Contador persistente de rondas por version |
@@ -435,6 +436,7 @@ gcloud functions deploy notion-frameio-sync \
 - open/resolved comments hoy se mantienen bien con `comment.created`, `comment.deleted` y `file.versioned`
 - `Last Frame Comment By` aun no existe porque el payload real disponible no trae actor enriquecido en la ruta que estamos usando
 - el endpoint de webhook de Frame.io sigue sin verificacion de firma
+- existe una discrepancia tecnica pendiente: llamadas directas locales a Frame.io con tokens refrescados manualmente siguen devolviendo `403` para recursos que la Cloud Function si puede leer; antes de volver a depender del shell local para diagnosticar Frame.io, hay que aislar si la diferencia esta en scope, tenant, secretos vigentes o contexto de autenticacion
 
 ## Feature plan: atribuir version a cada comentario de Frame.io
 
@@ -500,6 +502,14 @@ Plan de rollout recomendado:
    - asset con varias versiones
    - comentario sobre version vieja
 4. despues decidir si vale la pena ampliar a historiales completos o reportes por version
+
+Estado de implementacion en la branch `feature/frameio-comment-version-attribution`:
+- `main.py` ya tiene un helper para resolver el ordinal de version a partir del `file_id` del comentario
+- `fio_get_comment_signals()` ya puede devolver `last_comment_version`
+- `format_frameio_comment_for_notion()` ya puede renderizar `Version: N`
+- `notion_update_counts()` intenta escribir `Last Frame Comment Version` y hace fallback si la propiedad aun no existe en Notion
+- la validacion real basica en staging ya paso para la pagina `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`, donde `Last Frame Comment Version` se persistio como `1`
+- sigue faltando validar el comportamiento con assets reales de varias versiones antes de mergear o desplegar
 
 ## Documentacion complementaria
 
