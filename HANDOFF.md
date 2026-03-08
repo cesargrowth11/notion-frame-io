@@ -434,6 +434,20 @@
   - The Notion write path is tolerant if `Last Frame Comment Version` does not yet exist in the database schema
   - No deploy or live Notion schema change was performed in this step
 
+## 2026-03-08 00:15 America/Santiago - Codex
+
+- Task: Attempt real validation for comment-version attribution
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Confirmed branch `feature/frameio-comment-version-attribution` was clean and current
+  - Attempted to deploy `notion-frameio-sync-staging` from the branch
+  - Confirmed `gcloud` still has an active account configured, but deploy failed because the local session requires interactive reauthentication
+  - Attempted a direct real-API validation using the local Adobe refresh token and Frame.io endpoints for asset `7f289cd4-b30e-4103-91c8-48042497683a`
+  - The direct Frame.io call still returned `403 Forbidden`, so real validation could not be completed in this session
+- Notes:
+  - The branch remains implemented and locally verified
+  - The next useful step is to restore `gcloud` auth and then validate via staging, or separately confirm why the refreshed direct Frame.io call is returning `403`
+
 ## Template
 
 Copy this block for the next handoff:
