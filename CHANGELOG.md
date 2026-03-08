@@ -19,6 +19,7 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Se agrego trazabilidad explicita de que la fix fue validada en staging y sigue pendiente de merge a `main`.
 - Se actualizo la documentacion del plan Notion-only a estado implementado en branch, incluyendo la validacion real en staging sobre la secuencia `En curso -> Listo para revision -> Cambios Solicitados -> Listo para revision`.
 - Se documento la factibilidad tecnica y el plan exacto para atribuir `Version N` a comentarios de Frame.io usando `comment.file_id` y la posicion del file dentro del version stack, con rollout inicial limitado al ultimo comentario y al comentario espejado en Notion.
+- Se registro como deuda tecnica separada la discrepancia entre llamadas locales directas a Frame.io (`403`) y las mismas lecturas realizadas desde la Cloud Function, para investigarla antes de volver a depender de diagnosticos locales contra la API.
 
 ## [2.3.2] - 2026-03-07
 

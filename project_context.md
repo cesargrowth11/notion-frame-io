@@ -436,6 +436,7 @@ gcloud functions deploy notion-frameio-sync \
 - open/resolved comments hoy se mantienen bien con `comment.created`, `comment.deleted` y `file.versioned`
 - `Last Frame Comment By` aun no existe porque el payload real disponible no trae actor enriquecido en la ruta que estamos usando
 - el endpoint de webhook de Frame.io sigue sin verificacion de firma
+- existe una discrepancia tecnica pendiente: llamadas directas locales a Frame.io con tokens refrescados manualmente siguen devolviendo `403` para recursos que la Cloud Function si puede leer; antes de volver a depender del shell local para diagnosticar Frame.io, hay que aislar si la diferencia esta en scope, tenant, secretos vigentes o contexto de autenticacion
 
 ## Feature plan: atribuir version a cada comentario de Frame.io
 
@@ -507,7 +508,8 @@ Estado de implementacion en la branch `feature/frameio-comment-version-attributi
 - `fio_get_comment_signals()` ya puede devolver `last_comment_version`
 - `format_frameio_comment_for_notion()` ya puede renderizar `Version: N`
 - `notion_update_counts()` intenta escribir `Last Frame Comment Version` y hace fallback si la propiedad aun no existe en Notion
-- falta validar el comportamiento con assets reales de varias versiones antes de mergear o desplegar
+- la validacion real basica en staging ya paso para la pagina `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`, donde `Last Frame Comment Version` se persistio como `1`
+- sigue faltando validar el comportamiento con assets reales de varias versiones antes de mergear o desplegar
 
 ## Documentacion complementaria
 

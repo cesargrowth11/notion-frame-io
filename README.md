@@ -243,6 +243,8 @@ Estado en la branch `feature/frameio-comment-version-attribution`:
 - el runtime ya resuelve `Version: N` para el ultimo comentario y para `comment.created`
 - `Last Frame Comment Version` se escribe de forma tolerante: si la propiedad no existe todavia en Notion, el patch hace fallback sin romper el sync principal
 - el mirror de comentarios ya puede mostrar `Version: N` en la metadata del comentario espejado
+- la validacion real basica ya paso en staging con la pagina `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`: el ultimo comentario persistio `Last Frame Comment Version = 1`
+- sigue pendiente validar un asset real con varias versiones para confirmar ordinales mayores a `1` antes de mergear o desplegar
 
 Algoritmo propuesto:
 1. leer el comentario (`GET /comments/{comment_id}` o listado de comentarios del file)

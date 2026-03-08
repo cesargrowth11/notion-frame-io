@@ -468,26 +468,30 @@ def fio_comment_file_id(comment: dict | None) -> str | None:
     return None
 
 
-def _fio_get_v2_asset(asset_id: str) -> dict | None:
+def _fio_get_v4_file(file_id: str) -> dict | None:
     try:
-        r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}", timeout=15)
+        r = _fio_request("GET", f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/files/{file_id}", timeout=15)
         if r.status_code == 200:
-            data = r.json()
+            data = r.json().get("data", {})
             return data if isinstance(data, dict) else None
     except Exception as e:
-        logger.warning(f"Could not fetch V2 asset {asset_id}: {e}")
+        logger.warning(f"Could not fetch V4 file {file_id}: {e}")
     return None
 
 
-def _fio_get_v2_children(asset_id: str) -> list[dict]:
+def _fio_get_v4_version_stack_children(version_stack_id: str) -> list[dict]:
     try:
-        r = _fio_request("GET", f"{_FIO}/v2/assets/{asset_id}/children", timeout=15)
+        r = _fio_request(
+            "GET",
+            f"{_FIO}/v4/accounts/{FRAMEIO_ACCOUNT_ID}/version_stacks/{version_stack_id}/children?page_size=100",
+            timeout=15,
+        )
         if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                return [item for item in data if isinstance(item, dict)]
+            payload = r.json().get("data", [])
+            if isinstance(payload, list):
+                return [item for item in payload if isinstance(item, dict)]
     except Exception as e:
-        logger.warning(f"Could not fetch V2 children for {asset_id}: {e}")
+        logger.warning(f"Could not fetch V4 version stack children for {version_stack_id}: {e}")
     return []
 
 
@@ -495,21 +499,24 @@ def fio_resolve_file_version_ordinal(file_id: str | None) -> int | None:
     if not file_id:
         return None
 
-    asset = _fio_get_v2_asset(file_id)
-    if not isinstance(asset, dict):
+    file_obj = _fio_get_v4_file(file_id)
+    if not isinstance(file_obj, dict):
         return None
 
-    parent_id = asset.get("parent_id")
+    parent_id = file_obj.get("parent_id")
     if not parent_id:
         return 1
 
-    parent = _fio_get_v2_asset(parent_id)
-    if not isinstance(parent, dict) or parent.get("type") != "version_stack":
+    children = _fio_get_v4_version_stack_children(parent_id)
+    if not children:
         return 1
 
-    children = _fio_get_v2_children(parent_id)
     for index, child in enumerate(children):
-        if child.get("id") == file_id:
+        child_id = child.get("id")
+        file_ref = child.get("file", {})
+        if child_id == file_id:
+            return index + 1
+        if isinstance(file_ref, dict) and file_ref.get("id") == file_id:
             return index + 1
 
     logger.warning(f"File {file_id} was not found inside version stack {parent_id}")
@@ -586,7 +593,15 @@ def fio_get_comment_signals(asset_id: str) -> dict:
             out["last_comment_text"] = (latest.get("text") or "").strip()
             out["last_comment_at"] = latest.get("updated_at") or latest.get("created_at") or ""
             out["last_comment_timecode"] = _format_timecode(latest.get("timestamp"))
+            latest_comment_file_id = fio_comment_file_id(latest) or ""
             out["last_comment_version"] = fio_resolve_comment_version(latest) or 0
+            if not out["last_comment_version"]:
+                logger.warning(
+                    "Could not resolve last comment version for asset %s: latest_comment_id=%s latest_comment_file_id=%s",
+                    asset_id,
+                    out["last_comment_id"],
+                    latest_comment_file_id or "missing",
+                )
     except Exception as e:
         logger.warning(f"Comment signal fetch error for {asset_id}: {e}")
 
