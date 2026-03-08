@@ -24,6 +24,10 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Se documento una auditoria de hardening para el repo publico: la funcion sigue `allow-unauthenticated`, los webhooks no validan autenticacion suficiente y `GET /` expone metadata interna que conviene reducir.
 - Se documento la factibilidad tecnica del hardening: Frame.io permite verificacion HMAC con signing secret, Notion webhook actions permite headers custom para un secreto compartido y `allow-unauthenticated` no debe eliminarse como primer paso porque ambos proveedores siguen requiriendo un endpoint HTTP publico.
 - Se crearon tags anotados de git para todas las versiones publicadas (`v2.0.0` a `v2.3.2`) y se pushearon a GitHub; futuras releases deben incluir el tag como parte del proceso de publicacion.
+- Se sanitizo el repo publico: `README.md` reescrito sin IDs reales ni URLs de produccion; documentos internos (`project_context.md`, `HANDOFF.md`, `BUGS.md`, `TROUBLESHOOTING.md`, `TASKS.md`, `seed_and_deploy.py`) removidos del tracking de git y agregados a `.gitignore`; `AGENTS.md` y `CHANGELOG.md` limpiados de URLs y nombres de proyecto GCP.
+- Se realineo `project_context.md` con el estado real del runtime `2.3.2`: las fixes version-based de `Client Change Round`, las rondas workflow-only y `Last Frame Comment Version` ya no quedan descritas como trabajo pendiente en branch, y se agregaron las propiedades/env vars que ya existen en `main.py`.
+- Se acoto `BUG-008`: no era drift de `.env.yaml` ni de la Cloud Function, sino una diferencia de request shape en diagnosticos locales; con el mismo token, clientes locales con `User-Agent` por defecto (`PowerShell`, `urllib`) reproducen `403`, mientras un `User-Agent` estilo `python-requests/2.31.0` devuelve `200`.
+- Se documento explicitamente como funciona `BUG-008`, por que no afecta al runtime productivo y cual es el plan actual: workaround inmediato con clientes `requests`-based o `User-Agent` equivalente, y follow-up para crear un script unico de diagnostico local de Frame.io.
 
 ## [2.3.2] - 2026-03-07
 
