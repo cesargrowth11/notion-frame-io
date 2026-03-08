@@ -22,3 +22,11 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal ops docs (contain real resource IDs, not for public repo)
+project_context.md
+HANDOFF.md
+BUGS.md
+TROUBLESHOOTING.md
+TASKS.md
+seed_and_deploy.py

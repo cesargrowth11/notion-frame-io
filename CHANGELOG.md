@@ -132,6 +132,5 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Script `get_frameio_status_uuids.py` para descubrir UUIDs de metadata fields.
 
 ### Infraestructura
-- Google Cloud Function 2nd Gen, Python 3.12, region `us-central1`.
-- Proyecto GCP: `efeonce-group`.
-- URL publica: `https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync`.
+- Google Cloud Function 2nd Gen, Python 3.12.
+- Configuracion de proyecto, region y URL en `.env.yaml` y `deploy.sh`.

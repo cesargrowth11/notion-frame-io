@@ -66,7 +66,7 @@ Use the smallest relevant check for the task:
 
 - Python syntax: `python -m py_compile main.py`
 - Quick grep review: `rg -n "pattern" main.py`
-- Manual health endpoint check after deploy: `curl https://us-central1-efeonce-group.cloudfunctions.net/notion-frameio-sync`
+- Manual health endpoint check after deploy: `curl <CLOUD_FUNCTION_URL>`
 
 If deployment or live API checks are performed, record the outcome in `HANDOFF.md`.
 
