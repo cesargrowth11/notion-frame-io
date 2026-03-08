@@ -500,3 +500,16 @@ Copy this block for the next handoff:
 - Notes:
   - New tracking item: direct local Frame.io calls can return `403` even when the Cloud Function can read the same resources
   - This is not a runtime regression in production; it is an investigation gap affecting local diagnostics and future feature validation workflows
+
+## 2026-03-08 07:52 America/Santiago - Codex
+
+- Task: Merge `feature/frameio-comment-version-attribution` into `main` after regression validation
+- Files changed: `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Staging health check and replay of `POST /frameio-webhook` both succeeded before merge
+  - `git merge --no-ff --no-commit feature/frameio-comment-version-attribution` completed cleanly on `main`
+  - Reviewed staged merge diff for `main.py` and docs before confirming
+- Notes:
+  - Merge is justified because the feature branch no longer regresses current sync behavior and the V4 resolver fixed the prior `0`-version issue
+  - Full business validation of an ordinal greater than `1` is still pending because the current project does not expose a real version stack to test against
