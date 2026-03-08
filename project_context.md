@@ -503,13 +503,13 @@ Plan de rollout recomendado:
    - comentario sobre version vieja
 4. despues decidir si vale la pena ampliar a historiales completos o reportes por version
 
-Estado de implementacion en la branch `feature/frameio-comment-version-attribution`:
+Estado actual:
 - `main.py` ya tiene un helper para resolver el ordinal de version a partir del `file_id` del comentario
 - `fio_get_comment_signals()` ya puede devolver `last_comment_version`
 - `format_frameio_comment_for_notion()` ya puede renderizar `Version: N`
-- `notion_update_counts()` intenta escribir `Last Frame Comment Version` y hace fallback si la propiedad aun no existe en Notion
-- la validacion real basica en staging ya paso para la pagina `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`, donde `Last Frame Comment Version` se persistio como `1`
-- sigue faltando validar el comportamiento con assets reales de varias versiones antes de mergear o desplegar
+- `notion_update_counts()` escribe `Last Frame Comment Version` y mantiene fallback si la propiedad no existe en Notion
+- la validacion real basica ya paso en produccion para la pagina `31839c2f-efe7-81dd-8bd3-ca760c9a7a63`, donde `Last Frame Comment Version` se persistio como `1`
+- sigue faltando observar el comportamiento con assets reales de varias versiones cuando exista un version stack utilizable en el proyecto
 
 ## Documentacion complementaria
 

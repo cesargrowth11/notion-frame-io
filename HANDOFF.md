@@ -513,3 +513,17 @@ Copy this block for the next handoff:
 - Notes:
   - Merge is justified because the feature branch no longer regresses current sync behavior and the V4 resolver fixed the prior `0`-version issue
   - Full business validation of an ordinal greater than `1` is still pending because the current project does not expose a real version stack to test against
+
+## 2026-03-08 08:02 America/Santiago - Codex
+
+- Task: Deploy version-attribution changes to production and verify live behavior
+- Files changed: `README.md`, `project_context.md`, `CHANGELOG.md`, `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - `python -m py_compile main.py`
+  - Deployed `main` to production Cloud Function `notion-frameio-sync`
+  - Verified production health endpoint returned `status: ok`
+  - Replayed a safe production `POST /frameio-webhook` for file `7f289cd4-b30e-4103-91c8-48042497683a`
+  - Read Notion page `31839c2f-efe7-81dd-8bd3-ca760c9a7a63` and confirmed `Last Frame Comment Version = 1`
+- Notes:
+  - Production is now running the version-attribution logic
+  - The feature is considered shipped, with remaining monitoring only for the first real `Version > 1` case in this project

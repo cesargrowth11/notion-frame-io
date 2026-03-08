@@ -20,6 +20,7 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Se actualizo la documentacion del plan Notion-only a estado implementado en branch, incluyendo la validacion real en staging sobre la secuencia `En curso -> Listo para revision -> Cambios Solicitados -> Listo para revision`.
 - Se documento la factibilidad tecnica y el plan exacto para atribuir `Version N` a comentarios de Frame.io usando `comment.file_id` y la posicion del file dentro del version stack, con rollout inicial limitado al ultimo comentario y al comentario espejado en Notion.
 - Se registro como deuda tecnica separada la discrepancia entre llamadas locales directas a Frame.io (`403`) y las mismas lecturas realizadas desde la Cloud Function, para investigarla antes de volver a depender de diagnosticos locales contra la API.
+- Se dejo trazabilidad de que la feature de atribucion de version quedo mergeada y desplegada a produccion, con validacion real de `Last Frame Comment Version = 1` y seguimiento pendiente para el primer caso real de `Version > 1`.
 
 ## [2.3.2] - 2026-03-07
 
