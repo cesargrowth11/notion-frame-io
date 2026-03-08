@@ -437,6 +437,7 @@ gcloud functions deploy notion-frameio-sync \
 - `Last Frame Comment By` aun no existe porque el payload real disponible no trae actor enriquecido en la ruta que estamos usando
 - el endpoint de webhook de Frame.io sigue sin verificacion de firma
 - existe una discrepancia tecnica pendiente: llamadas directas locales a Frame.io con tokens refrescados manualmente siguen devolviendo `403` para recursos que la Cloud Function si puede leer; antes de volver a depender del shell local para diagnosticar Frame.io, hay que aislar si la diferencia esta en scope, tenant, secretos vigentes o contexto de autenticacion
+- el repo es publico y hoy el servicio sigue expuesto con `--allow-unauthenticated`; faltan autenticacion/validacion de origen para `/frameio-webhook`, autenticacion propia para `/notion-webhook` y reduccion del metadata expuesto por `GET /`
 
 ## Feature plan: atribuir version a cada comentario de Frame.io
 

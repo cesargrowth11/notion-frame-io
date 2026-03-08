@@ -21,6 +21,7 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
 | `BUG-006` | open | 2026-03-07 | — | `Cambios Solicitados` reporta `frameio_status: updated` pero no deja el asset en `Changes requested` |
 
 | `BUG-008` | open | 2026-03-08 | TBD | Llamadas directas locales a Frame.io devuelven `403` mientras la Cloud Function puede leer los mismos recursos |
+| `BUG-009` | open | 2026-03-08 | TBD | El repo publico expone un servicio con webhooks publicos sin autenticacion suficiente |
 
 ## Detalle
 
@@ -133,4 +134,26 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
   - La deuda queda abierta para investigacion separada antes de volver a usar el shell local como fuente principal de verificacion contra Frame.io.
 - Referencias:
   - `TASKS.md`
+  - `HANDOFF.md`
+
+### `BUG-009` El repo publico expone un servicio con webhooks publicos sin autenticacion suficiente
+
+- Sintoma:
+  - El repositorio es publico y documenta la URL productiva del servicio.
+  - La funcion se despliega con `--allow-unauthenticated`.
+  - `/frameio-webhook` no valida firma ni secreto compartido.
+  - `/notion-webhook` tampoco valida un secreto propio del emisor.
+  - `GET /` expone `notion_db` ademas del estado del servicio.
+- Causa raiz:
+  - El servicio fue priorizado para integracion rapida y no se cerro aun la capa de autenticacion/validacion de origen para webhooks.
+- Impacto:
+  - Un tercero que descubra la URL puede enviar `POST` a los webhooks.
+  - El repo publico reduce el costo de descubrimiento del endpoint y del modelo de integracion.
+  - Aunque no se observaron secretos activos en GitHub, la superficie de ataque publica es mayor de lo deseable.
+- Estado actual:
+  - Riesgo identificado y documentado.
+  - Falta implementar hardening del webhook de Frame.io, del webhook de Notion y del health endpoint.
+- Referencias:
+  - `TASKS.md`
+  - `project_context.md`
   - `HANDOFF.md`

@@ -539,3 +539,14 @@ Copy this block for the next handoff:
 - Notes:
   - No runtime or deployment changes in this step
   - `TASKS.md` now separates active priority queue from completed history, which should make the next planning session clearer
+
+## 2026-03-08 08:32 America/Santiago - Codex
+
+- Task: Document public-repo security exposure and hardening backlog before implementation
+- Files changed: `TASKS.md`, `BUGS.md`, `project_context.md`, `CHANGELOG.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed tracked files and confirmed no active secrets were found in the repository tree
+  - Reviewed current runtime/docs and confirmed the service is still public with unauthenticated webhooks and a health response that exposes `notion_db`
+- Notes:
+  - New high-priority task and bug were created for webhook/auth hardening in the context of a public GitHub repository
+  - No runtime, deployment, or secret rotation changes were made in this step
