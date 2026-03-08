@@ -527,3 +527,15 @@ Copy this block for the next handoff:
 - Notes:
   - Production is now running the version-attribution logic
   - The feature is considered shipped, with remaining monitoring only for the first real `Version > 1` case in this project
+
+## 2026-03-08 08:15 America/Santiago - Codex
+
+- Task: Prioritize the current project backlog and correct stale task notes
+- Files changed: `TASKS.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed current pending and done rows in `TASKS.md`
+  - Reordered pending tasks by priority (`P1`/`P2`/`P3`)
+  - Corrected the stale note that still said workflow-backed rounds were pending deployment
+- Notes:
+  - No runtime or deployment changes in this step
+  - `TASKS.md` now separates active priority queue from completed history, which should make the next planning session clearer
