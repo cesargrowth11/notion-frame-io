@@ -550,3 +550,35 @@ Copy this block for the next handoff:
 - Notes:
   - New high-priority task and bug were created for webhook/auth hardening in the context of a public GitHub repository
   - No runtime, deployment, or secret rotation changes were made in this step
+
+## 2026-03-08 10:02 America/Santiago - Codex
+
+- Task: Document hardening feasibility before implementation
+- Files changed: `TASKS.md`, `BUGS.md`, `project_context.md`, `CHANGELOG.md`, `HANDOFF.md`
+- Verification:
+  - Reviewed the already-collected official feasibility inputs for Frame.io webhooks and Notion webhook actions
+  - Confirmed the safe hardening sequence should start at the application layer, not by removing `--allow-unauthenticated`
+- Notes:
+  - Frame.io hardening is technically viable with HMAC verification, but depends on having the webhook signing secret or recreating the webhook
+  - Notion hardening is technically viable via a shared secret in custom headers
+  - No runtime or deployment changes were made in this step
+
+## 2026-03-08 11:15 America/Santiago - Claude
+
+- Task: Create annotated git tags for all released versions and push to GitHub
+- Files changed: git tags (no file changes)
+- Verification:
+  - Created annotated tags `v2.0.0` through `v2.3.2` mapped to correct commits
+  - `git tag -l -n1` confirmed all 6 tags with correct messages
+  - `git push origin --tags` succeeded; all 6 tags now visible on GitHub
+- Tags created:
+  - `v2.0.0` -> `0937761` (Initial commit: Notion <-> Frame.io V4 bidirectional sync)
+  - `v2.1.0` -> `b1b5fb2` (Add auto-refresh for Frame.io OAuth tokens)
+  - `v2.2.0` -> `d725645` (Add enhanced URL parsing: shortened URLs, view URLs, and fallback project search)
+  - `v2.3.0` -> `9c66509` (Add next.frame.io view URL pattern, normalize status matching)
+  - `v2.3.1` -> `8ddf4ac` (Migrate token persistence to Secret Manager)
+  - `v2.3.2` -> `b913a4e` (Ship Notion comment mirror for Frame.io feedback)
+- Notes:
+  - No runtime, deployment, or code changes were made
+  - Future releases should create a tag at the same time as the version bump in `main.py` and `CHANGELOG.md`
+  - Four merged feature branches remain locally and can be cleaned up separately

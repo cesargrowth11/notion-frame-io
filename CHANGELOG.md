@@ -22,6 +22,8 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Se registro como deuda tecnica separada la discrepancia entre llamadas locales directas a Frame.io (`403`) y las mismas lecturas realizadas desde la Cloud Function, para investigarla antes de volver a depender de diagnosticos locales contra la API.
 - Se dejo trazabilidad de que la feature de atribucion de version quedo mergeada y desplegada a produccion, con validacion real de `Last Frame Comment Version = 1` y seguimiento pendiente para el primer caso real de `Version > 1`.
 - Se documento una auditoria de hardening para el repo publico: la funcion sigue `allow-unauthenticated`, los webhooks no validan autenticacion suficiente y `GET /` expone metadata interna que conviene reducir.
+- Se documento la factibilidad tecnica del hardening: Frame.io permite verificacion HMAC con signing secret, Notion webhook actions permite headers custom para un secreto compartido y `allow-unauthenticated` no debe eliminarse como primer paso porque ambos proveedores siguen requiriendo un endpoint HTTP publico.
+- Se crearon tags anotados de git para todas las versiones publicadas (`v2.0.0` a `v2.3.2`) y se pushearon a GitHub; futuras releases deben incluir el tag como parte del proceso de publicacion.
 
 ## [2.3.2] - 2026-03-07
 

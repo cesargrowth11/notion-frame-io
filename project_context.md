@@ -417,6 +417,16 @@ Estado de rollout en esta branch:
 - solo despues de validar que nada se rompio se mergea a `main`, se despliega y se crea tag de version
 - si aparece una regresion, el primer rollback es apagar el feature flag; el segundo es revertir el PR
 
+### Tags de version
+
+- cada version publicada tiene un tag anotado en git (`v2.0.0` a `v2.3.2`)
+- los tags estan pusheados a GitHub y visibles en la seccion Releases/Tags del repo
+- al publicar una nueva version, crear el tag anotado junto con el bump en `main.py` y `CHANGELOG.md`:
+  ```bash
+  git tag -a vX.Y.Z -m "Descripcion breve de la release"
+  git push origin vX.Y.Z
+  ```
+
 ## Deploy
 
 ```bash
@@ -438,6 +448,20 @@ gcloud functions deploy notion-frameio-sync \
 - el endpoint de webhook de Frame.io sigue sin verificacion de firma
 - existe una discrepancia tecnica pendiente: llamadas directas locales a Frame.io con tokens refrescados manualmente siguen devolviendo `403` para recursos que la Cloud Function si puede leer; antes de volver a depender del shell local para diagnosticar Frame.io, hay que aislar si la diferencia esta en scope, tenant, secretos vigentes o contexto de autenticacion
 - el repo es publico y hoy el servicio sigue expuesto con `--allow-unauthenticated`; faltan autenticacion/validacion de origen para `/frameio-webhook`, autenticacion propia para `/notion-webhook` y reduccion del metadata expuesto por `GET /`
+
+### Factibilidad tecnica del hardening
+
+- `Frame.io -> Cloud Function`:
+  - es viable endurecerlo a nivel aplicacion con verificacion HMAC usando `X-Frameio-Request-Timestamp` y `X-Frameio-Signature`
+  - eso requiere conservar el signing secret del webhook activo o recrear el webhook si ese secret no quedo almacenado
+- `Notion -> Cloud Function`:
+  - es viable endurecerlo con un secreto compartido en un header custom de la automation de Notion
+  - no se confirmo un esquema nativo de firma HMAC equivalente al de Frame.io
+- `GET /`:
+  - es viable reducir el payload publico del health endpoint sin afectar el sync principal
+- `allow-unauthenticated`:
+  - no es el primer cambio correcto
+  - Notion y Frame.io siguen necesitando un endpoint HTTP publico, asi que el primer hardening debe ser en la aplicacion, no cerrando IAM
 
 ## Feature plan: atribuir version a cada comentario de Frame.io
 

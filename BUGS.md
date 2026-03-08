@@ -153,6 +153,11 @@ Registro operativo de bugs/issues del proyecto. Cada bug tiene un ID estable par
 - Estado actual:
   - Riesgo identificado y documentado.
   - Falta implementar hardening del webhook de Frame.io, del webhook de Notion y del health endpoint.
+  - La factibilidad tecnica ya quedo acotada:
+    - Frame.io si permite verificacion HMAC con signing secret del webhook.
+    - Notion webhook actions permite headers custom para un secreto compartido.
+    - Quitar `--allow-unauthenticated` o cerrar el endpoint con IAM no es un primer paso viable porque ambos proveedores siguen necesitando un endpoint HTTP publico.
+    - Si no se guardo el signing secret actual de Frame.io, habra que recrear el webhook para habilitar la verificacion.
 - Referencias:
   - `TASKS.md`
   - `project_context.md`
