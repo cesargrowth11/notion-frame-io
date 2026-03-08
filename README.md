@@ -160,6 +160,22 @@ gcloud functions deploy <nombre-funcion> \
 - El webhook no incluye `comment.completed` / `comment.uncompleted` todavia
 - No existe `Last Frame Comment By` porque el payload no trae actor enriquecido
 
+## Diagnostico local
+
+Para diagnosticos read-only contra Frame.io existe el helper `frameio_local_diag.py`.
+
+Uso rapido:
+
+```bash
+python frameio_local_diag.py --check accounts
+python frameio_local_diag.py --check file --file-id <uuid>
+```
+
+Notas:
+- el perfil por defecto usa un request shape compatible con el runtime
+- `--profile bare` permite reproducir el falso `403` local de `BUG-008`
+- el helper es solo de lectura; no deploya ni modifica produccion
+
 ## GitHub workflow
 
 - Desarrollar en feature branches, no directo en `main`

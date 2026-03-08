@@ -14,6 +14,9 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - La logica de workflow-only bootstrappea la primera ronda en `1` cuando una tarea preexistente entra por primera vez a `Listo para revision` con campos auxiliares vacios, y evita dobles incrementos en webhooks repetidos mientras la revision sigue abierta.
 - La branch `feature/frameio-comment-version-attribution` agrega resolucion de `Version N` para comentarios de Frame.io a partir de `comment.file_id` y el orden actual del version stack, y prepara la propiedad `Last Frame Comment Version` junto con la metadata `Version: N` en comentarios espejados.
 
+### Agregado
+- `frameio_local_diag.py`: helper local, read-only, para diagnosticar Frame.io con un request profile compatible con el runtime y reproducir `BUG-008` de forma controlada usando `--profile bare`.
+
 ### Documentacion
 - Se alinearon `README.md`, `project_context.md` y `BUGS.md` con la nueva semantica version-based de `Client Change Round` antes de validar el branch para merge.
 - Se agrego trazabilidad explicita de que la fix fue validada en staging y sigue pendiente de merge a `main`.
@@ -28,6 +31,7 @@ Todos los cambios relevantes de este proyecto se documentan aqui.
 - Se realineo `project_context.md` con el estado real del runtime `2.3.2`: las fixes version-based de `Client Change Round`, las rondas workflow-only y `Last Frame Comment Version` ya no quedan descritas como trabajo pendiente en branch, y se agregaron las propiedades/env vars que ya existen en `main.py`.
 - Se acoto `BUG-008`: no era drift de `.env.yaml` ni de la Cloud Function, sino una diferencia de request shape en diagnosticos locales; con el mismo token, clientes locales con `User-Agent` por defecto (`PowerShell`, `urllib`) reproducen `403`, mientras un `User-Agent` estilo `python-requests/2.31.0` devuelve `200`.
 - Se documento explicitamente como funciona `BUG-008`, por que no afecta al runtime productivo y cual es el plan actual: workaround inmediato con clientes `requests`-based o `User-Agent` equivalente, y follow-up para crear un script unico de diagnostico local de Frame.io.
+- Se documento el helper `frameio_local_diag.py` como camino soportado para diagnosticos locales de Frame.io y para la reproduccion controlada de `BUG-008`.
 
 ## [2.3.2] - 2026-03-07
 
