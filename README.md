@@ -190,3 +190,17 @@ Notas:
 - [TASKS.md](TASKS.md) - backlog de tareas
 - [HANDOFF.md](HANDOFF.md) - traspasos entre agentes
 - [project_context.md](project_context.md) - contexto operativo completo
+
+---
+
+## 🌱 Ecosystem note (2026-05-18)
+
+This repository is part of the **Greenhouse / Efeonce Group operational ecosystem**.
+
+**Canonical Notion → BigQuery delivery sync** ahora vive en:
+
+- **`efeoncepro/notion-bigquery`** (transferido desde `cesargrowth11` el 2026-05-18 para cerrar trust boundary — el sync que orquesta la cascada Notion → BQ → PG → ICO compute + bonus ya no vive en cuenta personal)
+- **Status**: Deprecated — Maintenance only. Sunset post TASK-908 GA en `efeoncepro/greenhouse-eo`.
+- **Política**: critical patches únicamente (defensive fixes contra renames Notion, schema drift). NO nuevas features.
+
+**Canonical ecosystem spec**: ver [`efeoncepro/greenhouse-eo/docs/operations/GREENHOUSE_REPO_ECOSYSTEM_V1.md`](https://github.com/efeoncepro/greenhouse-eo/blob/develop/docs/operations/GREENHOUSE_REPO_ECOSYSTEM_V1.md) para mapping completo de qué repo es source-of-truth para cada dominio.
